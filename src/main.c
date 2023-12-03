@@ -32,11 +32,11 @@ int main(int argc, char **argv)
     if (re_rewrite_range(tokens_infix, MAX_REGEX) == NULL)
         return 1;
 
-    DEBUG("TOKENS RANGE:  "); debug_reg(tokens_infix);
+    DEBUG("TOKENS RANGE:  "); re_debug_reg(tokens_infix);
     
     tokens_postfix = re2post(tokens_infix, MAX_REGEX);
 
-    DEBUG("TOKENS:  "); debug_reg(tokens_postfix);
+    DEBUG("TOKENS:  "); re_debug_reg(tokens_postfix);
 
 
 
@@ -56,7 +56,7 @@ int main(int argc, char **argv)
     struct NFA nfa = nfa_init();
     //struct State *s = nfa_compile_rec(&nfa, tokens_postfix, NULL);
     nfa_compile(&nfa, tokens_postfix);
-    state_debug(nfa.start, 0);
+    re_state_debug(nfa.start, 0);
     //state_debug(s, 0);
     if (re_match(&nfa, input, result, MAX_STR_RESULT))
         DEBUG("RESULT: %s\n", result);
