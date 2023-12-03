@@ -3,7 +3,27 @@ A C regex library that works on tiny computers
 
 Definitely a work in progress.  
 
-## Read stuff:
+## Features
+
+    # Character class
+    [abc]
+
+    # Character class with range
+    [a-zA-z0-9]
+
+    # Negated character class
+    [^abc]
+
+    * Group
+    (a|b|c)
+
+    Characters
+    \d \D \w \W \s \S .
+
+    Multipliers
+    + * ?
+
+## Read stuff
 
 ### Papers
 - [OG Ken Thompson](https://dl.acm.org/doi/10.1145/363347.363387)
