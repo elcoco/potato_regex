@@ -29,10 +29,14 @@ int main(int argc, char **argv)
     if (tokenize(expr, tokens_infix, MAX_REGEX) == NULL)
         return 1;
 
-    if (re_rewrite_range(tokens_infix, MAX_REGEX) == NULL)
+    DEBUG("TOKENS:  "); re_debug_reg(tokens_infix);
+    //if (re_rewrite_range(tokens_infix, MAX_REGEX) == NULL)
+    //    return 1;
+    if (re_parse_cclass(tokens_infix, MAX_REGEX) == NULL)
         return 1;
 
-    DEBUG("TOKENS RANGE:  "); re_debug_reg(tokens_infix);
+
+    DEBUG("TOKENS POST CCLASS:  "); re_debug_reg(tokens_infix);
     
     tokens_postfix = re2post(tokens_infix, MAX_REGEX);
 

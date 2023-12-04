@@ -26,6 +26,7 @@ extern int do_error;
 #define INFO(M, ...) if(do_info){fprintf(stdout, M, ##__VA_ARGS__);}
 #define ERROR(M, ...) if(do_error){fprintf(stderr, "[ERROR] (%s:%d) " M, __FILE__, __LINE__, ##__VA_ARGS__);}
 
+#define MAX_TOKEN_POOL  128
 #define MAX_STR_RESULT  128
 #define MAX_STATE_POOL  1024
 #define MAX_OUT_LIST_POOL  1024
@@ -64,6 +65,8 @@ enum ReTokenType {
     RE_TOK_TYPE_PIPE,       //  |   OR
     //////////////////////////
                          //
+    RE_TOK_TYPE_CCLASS, // [
+    RE_TOK_TYPE_CCLASS_NEGATED, // [
     RE_TOK_TYPE_RANGE_START,  // {n}  NON GREEDY match preceding n times
     RE_TOK_TYPE_RANGE_END,    // {n}  NON GREEDY match preceding n times
     RE_TOK_TYPE_GROUP_START,  // (
@@ -102,6 +105,8 @@ static const char *token_type_table[] = {
     "RE_TOK_TYPE_QUESTION",   //  ?   NON GREEDY match preceding 1 time            when combined with another quantifier it makes it non greedy
     "RE_TOK_TYPE_CONCAT",          // explicit concat symbol
     "RE_TOK_TYPE_PIPE",       //  |   OR
+    "RE_TOK_TYPE_CCLASS",
+    "RE_TOK_TYPE_CCLASS_NEGATED",
     "RE_TOK_TYPE_RANGE_START",  // {n}  NON GREEDY match preceding n times
     "RE_TOK_TYPE_RANGE_END",    // {n}  NON GREEDY match preceding n times
     "RE_TOK_TYPE_GROUP_START",  // (
@@ -133,7 +138,9 @@ struct ReToken {
     enum ReTokenType type;
     char c0;
     char c1;
-    unsigned char negated;
+
+    // Is used in case of a character class. All the chars are stored here
+    struct ReToken *next;
 };
 
 enum StateType {
@@ -186,6 +193,7 @@ struct NFA nfa_init();
 struct ReToken* re2post(struct ReToken *tokens, size_t size);
 struct ReToken* re_rewrite_range(struct ReToken *tokens, size_t size);
 void re_debug_reg(struct ReToken *tokens);
+struct ReToken* re_parse_cclass(struct ReToken *tokens, size_t size);
 
 
 #endif

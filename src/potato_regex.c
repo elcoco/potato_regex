@@ -13,9 +13,24 @@ static void   re_stack_debug(struct Group *stack, size_t size);
 static void   group_patch_outlist(struct Group *g, struct State **s);
 static struct OutList* outlist_join(struct OutList *l0, struct OutList *l1);
 
-static struct ReToken re_str_to_token(const char **s);
+//static struct ReToken re_str_to_token(const char **s);
+static struct ReToken* re_str_to_token(const char **s);
 static char* re_token_to_str(struct  ReToken *t);
 static const char* re_token_type_to_str(enum ReTokenType type);
+static int re_match_list_has_token(struct MatchList *clist, struct MatchList *nlist, char c, int n);
+
+static struct ReToken tpool[MAX_TOKEN_POOL];
+static int tpool_n = 0;
+
+
+static struct ReToken* re_token_new(enum ReTokenType type)
+{
+    /* Get new token from pool */
+    struct ReToken *t = &(tpool[tpool_n++]);
+    memset(t, 0, sizeof(struct ReToken));
+    t->type = type;
+    return t;
+}
 
 
 static struct State* nfa_state_init(struct NFA *nfa, struct ReToken *t, enum StateType type, struct State *s_out, struct State *s_out1)
@@ -64,11 +79,7 @@ void re_state_debug(struct State *s, int level)
             }
             break;
         default:
-            if (s->t->negated)
-                printf("State: !");
-            else
-                printf("State: ");
-
+            printf("State: ");
             printf("%s %s\n", re_token_type_to_str(s->t->type), re_token_to_str(s->t));
             break;
 
@@ -259,8 +270,12 @@ struct ReToken* re2post(struct ReToken *tokens, size_t size)
     struct ReToken out[size];
     memset(&out, 0, sizeof(struct ReToken) * size);
     struct ReToken *outp = out;
-    struct ReToken tcat = {.type=RE_TOK_TYPE_CONCAT, .c0=CONCAT_SYM, .negated=0};
-    struct ReToken tpipe = {.type=RE_TOK_TYPE_PIPE, .c0='|', .negated=0};
+    struct ReToken *tcat = (re_token_new(RE_TOK_TYPE_CONCAT));
+    struct ReToken *tpipe = (re_token_new(RE_TOK_TYPE_PIPE));
+    //struct ReToken tcat = {.type=RE_TOK_TYPE_CONCAT, .c0=CONCAT_SYM};
+    //struct ReToken tpipe = {.type=RE_TOK_TYPE_PIPE, .c0='|'};
+    tcat->c0 = CONCAT_SYM;
+    tpipe->c0 = '|';
 
 	int nalt, natom;
 
@@ -284,7 +299,7 @@ struct ReToken* re2post(struct ReToken *tokens, size_t size)
             case RE_TOK_TYPE_GROUP_START:
                 if (natom > 1){
                     --natom;
-                    *outp++ = tcat;
+                    *outp++ = *tcat;
                 }
                 if (p >= paren+100)
                     return NULL;
@@ -298,7 +313,7 @@ struct ReToken* re2post(struct ReToken *tokens, size_t size)
                 if (natom == 0)
                     return NULL;
                 while (--natom > 0)
-                    *outp++ = tcat;
+                    *outp++ = *tcat;
                 nalt++;
                 break;
             case RE_TOK_TYPE_GROUP_END:
@@ -307,9 +322,9 @@ struct ReToken* re2post(struct ReToken *tokens, size_t size)
                 if (natom == 0)
                     return NULL;
                 while (--natom > 0)
-                    *outp++ = tcat;
+                    *outp++ = *tcat;
                 for (; nalt > 0; nalt--)
-                    *outp++ = tpipe;
+                    *outp++ = *tpipe;
                 --p;
                 nalt = p->nalt;
                 natom = p->natom;
@@ -325,7 +340,7 @@ struct ReToken* re2post(struct ReToken *tokens, size_t size)
             default:
                 if (natom > 1){
                     --natom;
-                    *outp++ = tcat;
+                    *outp++ = *tcat;
                 }
                 *outp++ = *t;
                 natom++;
@@ -335,109 +350,117 @@ struct ReToken* re2post(struct ReToken *tokens, size_t size)
 	if (p != paren)
 		return NULL;
 	while (--natom > 0)
-		*outp++ = tcat;
+		*outp++ = *tcat;
 	for (; nalt > 0; nalt--)
-		*outp++ = tpipe;
+		*outp++ = *tpipe;
 
     memcpy(tokens, out, size);
 	return tokens;
 }
 
-static struct ReToken re_str_to_token(const char **s)
+static struct ReToken* re_str_to_token(const char **s)
 {
     /* Reads first meta char from string and convert to Token struct.
      * If one char meta or char, increment pointer +1
      * If two char meta, increment pointer +2 */
     assert(strlen(*s) > 0);
 
-    struct ReToken tok;
+    struct ReToken *tok = re_token_new(RE_TOK_TYPE_UNDEFINED);
 
     char c = **s;
 
-    if (strlen(*s) > 1 && **s == '\\') {
+    if (strlen(*s) > 2 && *(*s+1) == '-') {
+        tok->type = RE_TOK_TYPE_RANGE;
+        tok->c0 = c;
+        (*s)+=2;
+        tok->c1 = **s;
+        (*s)++;
+    }
+
+    else if (strlen(*s) > 1 && **s == '\\') {
         c = *((*s)+1);
         (*s)+=2;
-        tok.c0 = c;
+        tok->c0 = c;
         switch (c) {
             case 'd':
-                tok.type = RE_TOK_TYPE_DIGIT;
+                tok->type = RE_TOK_TYPE_DIGIT;
                 break;
             case 'D':
-                tok.type = RE_TOK_TYPE_NON_DIGIT;
+                tok->type = RE_TOK_TYPE_NON_DIGIT;
                 break;
             case 'w':
-                tok.type = RE_TOK_TYPE_ALPHA_NUM;
+                tok->type = RE_TOK_TYPE_ALPHA_NUM;
                 break;
             case 'W':
-                tok.type = RE_TOK_TYPE_ALPHA_NUM;
+                tok->type = RE_TOK_TYPE_ALPHA_NUM;
                 break;
             case 's':
-                tok.type = RE_TOK_TYPE_SPACE;
+                tok->type = RE_TOK_TYPE_SPACE;
                 break;
             case 'S':
-                tok.type = RE_TOK_TYPE_NON_SPACE;
+                tok->type = RE_TOK_TYPE_NON_SPACE;
                 break;
             default:
-                tok.type = RE_TOK_TYPE_CHAR;
+                tok->type = RE_TOK_TYPE_CHAR;
                 break;
         }
     }
 
     else {
-        tok.c0 = c;
+        tok->c0 = c;
         (*s)++;
         switch (c) {
             case '*':
-                tok.type = RE_TOK_TYPE_STAR;
+                tok->type = RE_TOK_TYPE_STAR;
                 break;
             case '+':
-                tok.type = RE_TOK_TYPE_PLUS;
+                tok->type = RE_TOK_TYPE_PLUS;
                 break;
             case '?':
-                tok.type = RE_TOK_TYPE_QUESTION;
+                tok->type = RE_TOK_TYPE_QUESTION;
                 break;
             case '{':
-                tok.type = RE_TOK_TYPE_RANGE_START;
+                tok->type = RE_TOK_TYPE_RANGE_START;
                 break;
             case '}':
-                tok.type = RE_TOK_TYPE_RANGE_END;
+                tok->type = RE_TOK_TYPE_RANGE_END;
                 break;
             case '(':
-                tok.type = RE_TOK_TYPE_GROUP_START;
+                tok->type = RE_TOK_TYPE_GROUP_START;
                 break;
             case ')':
-                tok.type = RE_TOK_TYPE_GROUP_END;
+                tok->type = RE_TOK_TYPE_GROUP_END;
                 break;
             case '[':
-                tok.type = RE_TOK_TYPE_CCLASS_START;
+                tok->type = RE_TOK_TYPE_CCLASS_START;
                 break;
             case ']':
-                tok.type = RE_TOK_TYPE_CCLASS_END;
+                tok->type = RE_TOK_TYPE_CCLASS_END;
                 break;
             case '|':
-                tok.type = RE_TOK_TYPE_PIPE;
+                tok->type = RE_TOK_TYPE_PIPE;
                 break;
             case '\\':
-                tok.type = RE_TOK_TYPE_BACKSLASH;
+                tok->type = RE_TOK_TYPE_BACKSLASH;
                 break;
             // decide between BEGIN and NEGATE
             case '^':
-                tok.type = RE_TOK_TYPE_CARET;
+                tok->type = RE_TOK_TYPE_CARET;
                 break;
             case '$':
-                tok.type = RE_TOK_TYPE_END;
+                tok->type = RE_TOK_TYPE_END;
                 break;
             case '-':
-                tok.type = RE_TOK_TYPE_HYPHEN;
+                tok->type = RE_TOK_TYPE_HYPHEN;
                 break;
             case '.':
-                tok.type = RE_TOK_TYPE_DOT;
+                tok->type = RE_TOK_TYPE_DOT;
                 break;
             case CONCAT_SYM:
-                tok.type = RE_TOK_TYPE_CONCAT;
+                tok->type = RE_TOK_TYPE_CONCAT;
                 break;
             default:
-                tok.type = RE_TOK_TYPE_CHAR;
+                tok->type = RE_TOK_TYPE_CHAR;
                 break;
         }
     }
@@ -447,9 +470,17 @@ static struct ReToken re_str_to_token(const char **s)
 static char* re_token_to_str(struct  ReToken *t)
 {
     static char buf[32] = "";
+    struct ReToken *tcclass;
     buf[0] = '\0';
     /* Get string representation of token */
     switch (t->type) {
+        //case RE_TOK_TYPE_CCLASS:
+        //    tcclass = t;
+        //    while (tcclass != NULL) {
+        //        snprintf(buf, sizeof(buf), "%s->%s'%c'%s", buf, PRRED, tcclass->c0, PRRESET);
+        //        tcclass = tcclass->next;
+        //    }
+        //    break;
         case RE_TOK_TYPE_CONCAT:
             snprintf(buf, sizeof(buf), "%s%c%s", PRRED, CONCAT_SYM, PRRESET);
             break;
@@ -502,9 +533,6 @@ void re_debug_reg(struct ReToken *tokens)
         if (t != tokens)
             printf(" ");
 
-        if (t->negated)
-            printf("!");
-
         printf("%s", re_token_to_str(t));
         t++;
     }
@@ -518,43 +546,25 @@ struct ReToken* tokenize(const char *expr, struct ReToken *buf, size_t size)
     unsigned int i = 0;
 
     while (strlen(*p_in)) {
-        struct ReToken t = re_str_to_token(p_in);
+        struct ReToken *t = re_str_to_token(p_in);
 
-        assert(t.type != RE_TOK_TYPE_UNDEFINED);
+        assert(t->type != RE_TOK_TYPE_UNDEFINED);
         if (i >= size) {
             ERROR("Max tokensize reached: %ld\n", size);
             return NULL;
         }
-        *p_out++ = t;
+        *p_out++ = *t;
         i++;
     }
     return buf;
 }
 
-struct ReToken* re_rewrite_range(struct ReToken *tokens, size_t size)
+struct ReToken* re_parse_cclass(struct ReToken *tokens, size_t size)
 {
-    /* Extract range from tokens and rewrite to group.
-     * This makes it way easier to do the reverse Polish notation algorithm later.
-     *
-     * eg: [a-zA-Zbx] -> (range_token | range_token | b | x)
-     * 
-     * if negated:
-     *     [^a-zXC] => (!range_token && !X && !C)
-     *
-     * Algorithm:
-     * for TOKEN in TOKENS
-     *     TOKEN_TOP_STACK = pop from stack
-     *     if TOKEN_TOP_STACK is hyphen
-     *         TOKEN_RANGE_START = pop from stack
-     *         create TOKEN_RANGE (TOKEN_RANGE_START - TOKEN)
-     *         push TOKEN_RANGE to output array
-     *     else
-     *         push TOKEN to stack
-     */
     struct ReToken *t = tokens;
+
     struct ReToken out_buf[size];
     struct ReToken *t_out = out_buf;
-
     memset(&out_buf, 0, sizeof(struct ReToken) * size);
 
     // Temporary buffer for tokens inside cclass
@@ -562,87 +572,173 @@ struct ReToken* re_rewrite_range(struct ReToken *tokens, size_t size)
         unsigned char in_cclass;
         struct ReToken *tokens[MAX_CCLASS];
         int size;
-        int is_negated;
+        unsigned char is_negated;
     } cclass;
 
-    struct ReToken *stack[size];
-
-    #define STACK_IS_EMPTY() (stackp == stack)
-    #define PUSH(S) *stackp++ = S
-    #define POP()   *--stackp
     #define RESET_CCLASS() memset(&cclass, 0, sizeof(struct Cclass))
     RESET_CCLASS();
 
-    for (; t->type != RE_TOK_TYPE_UNDEFINED ; t++) {
+    for (; t->type!=RE_TOK_TYPE_UNDEFINED ; t++) {
         if (t->type == RE_TOK_TYPE_CCLASS_START) {
+            DEBUG("START OF CCLASS\n");
             cclass.in_cclass = 1;
         }
-        else if (cclass.in_cclass && t->type == RE_TOK_TYPE_CARET) {
-            cclass.is_negated = 1;
-            DEBUG("cclass is negated\n");
-        }
-
-        // Cclass end found. Now convert tokens in temporary buffer to a group so it is easier to do RPN later
         else if (t->type == RE_TOK_TYPE_CCLASS_END) {
-            *t_out++ = (struct ReToken){.type=RE_TOK_TYPE_GROUP_START, .negated=0};
-            struct ReToken **stackp = stack;
-            struct ReToken **cclassp = cclass.tokens;
-
-            for (int i=0 ; i<cclass.size ; i++, cclassp++) {
-
-                struct ReToken *t0 = POP();
-                if (STACK_IS_EMPTY() &&  t0->type == RE_TOK_TYPE_HYPHEN) {
-                    ERROR("Malformed range\n");
-                    return NULL;
-                }
-
-                // Check if we're dealing with a range in format: [a-z]
-                if (t0->type == RE_TOK_TYPE_HYPHEN) {
-                    struct ReToken *t1 = POP();
-                    *t_out++ = (struct ReToken){.type=RE_TOK_TYPE_RANGE, .c0=t1->c0, .c1=(*cclassp)->c0, .negated=0};
-
-                    if (i > 0)
-                        *t_out++ = (struct ReToken){.type=RE_TOK_TYPE_PIPE, .negated=0};
-                }
-                // It's not a range so we can easily rewrite: [abc] == (a|b|c)
-                else {
-                    PUSH(t0);
-                    PUSH(*cclassp);
-                }
+            if (!cclass.in_cclass) {
+                DEBUG("Malformatted cclass\n");
+                return NULL;
             }
 
-            // empty stack into output buffer
-            while (!STACK_IS_EMPTY()) {
-                struct ReToken *tmp = POP();
-                *t_out++ = *tmp;
-                *t_out++ = (struct ReToken){.type=RE_TOK_TYPE_PIPE, .negated=0};
-            }
-
-            // remove extra pipe
-            t_out--;
-            *t_out++ = (struct ReToken){.type=RE_TOK_TYPE_GROUP_END, .negated=0};
+            DEBUG("END OF CCLASS\n");
+            struct ReToken t_cclass;
+            t_cclass.c0='x';
 
             if (cclass.is_negated)
-                *t_out++ = (struct ReToken){.type=RE_TOK_TYPE_NEGATE, .c0='^', .negated=0};
+                t_cclass.type=RE_TOK_TYPE_CCLASS_NEGATED;
+            else
+                t_cclass.type=RE_TOK_TYPE_CCLASS;
 
+            struct ReToken **cur = cclass.tokens;
+            struct ReToken *tcclassp = &t_cclass;
+            struct ReToken **prev = &tcclassp;
+
+            for (; *cur != NULL && (*cur)->type != RE_TOK_TYPE_UNDEFINED ; cur++) {
+                (*prev)->next = *cur;
+                DEBUG("Adding: %s", re_token_to_str(*prev));
+                printf("-> %s\n", re_token_to_str(*cur));
+                prev = cur;
+            }
+
+            *t_out++ = t_cclass;
             RESET_CCLASS();
+
+            struct ReToken *tcclass = t_cclass.next;
         }
-        // Add token to temporary cclass buffer
+        else if (cclass.in_cclass && cclass.size == 0 && t->type == RE_TOK_TYPE_CARET) {
+            DEBUG("IS NEGATED\n");
+            cclass.is_negated = 1;
+        }
         else if (cclass.in_cclass) {
             cclass.tokens[cclass.size++] = t;
+            DEBUG("CCLASS TOKEN: %s, %s\n", re_token_type_to_str(t->type), re_token_to_str(t));
         }
         else {
+            DEBUG("COPY TOKEN: %s, %s\n", re_token_type_to_str(t->type), re_token_to_str(t));
             *t_out++ = *t;
         }
     }
     memcpy(tokens, out_buf, size*sizeof(struct ReToken));
     return tokens;
-
-    #undef STACK_IS_EMPTY
-    #undef PUSH
-    #undef POP
-    #undef RESET_CCLASS
 }
+
+
+//struct ReToken* re_rewrite_range(struct ReToken *tokens, size_t size)
+//{
+//    /* Extract range from tokens and rewrite to group.
+//     * This makes it way easier to do the reverse Polish notation algorithm later.
+//     *
+//     * eg: [a-zA-Zbx] -> (range_token | range_token | b | x)
+//     * 
+//     * if negated:
+//     *     [^a-zXC] => (!range_token && !X && !C)
+//     *
+//     * Algorithm:
+//     * for TOKEN in TOKENS
+//     *     TOKEN_TOP_STACK = pop from stack
+//     *     if TOKEN_TOP_STACK is hyphen
+//     *         TOKEN_RANGE_START = pop from stack
+//     *         create TOKEN_RANGE (TOKEN_RANGE_START - TOKEN)
+//     *         push TOKEN_RANGE to output array
+//     *     else
+//     *         push TOKEN to stack
+//     */
+//    struct ReToken *t = tokens;
+//    struct ReToken out_buf[size];
+//    struct ReToken *t_out = out_buf;
+//
+//    memset(&out_buf, 0, sizeof(struct ReToken) * size);
+//
+//    // Temporary buffer for tokens inside cclass
+//    struct Cclass {
+//        unsigned char in_cclass;
+//        struct ReToken *tokens[MAX_CCLASS];
+//        int size;
+//    } cclass;
+//
+//    struct ReToken *stack[size];
+//
+//    #define STACK_IS_EMPTY() (stackp == stack)
+//    #define PUSH(S) *stackp++ = S
+//    #define POP()   *--stackp
+//    #define RESET_CCLASS() memset(&cclass, 0, sizeof(struct Cclass))
+//    RESET_CCLASS();
+//
+//    for (; t->type != RE_TOK_TYPE_UNDEFINED ; t++) {
+//        if (t->type == RE_TOK_TYPE_CCLASS_START) {
+//            cclass.in_cclass = 1;
+//        }
+//
+//        // Cclass end found. Now convert tokens in temporary buffer to a group so it is easier to do RPN later
+//        else if (t->type == RE_TOK_TYPE_CCLASS_END) {
+//            *t_out++ = re_token_new(RE_TOK_TYPE_GROUP_START);
+//            struct ReToken **stackp = stack;
+//            struct ReToken **cclassp = cclass.tokens;
+//
+//            for (int i=0 ; i<cclass.size ; i++, cclassp++) {
+//
+//                struct ReToken *t0 = POP();
+//                if (STACK_IS_EMPTY() && t0->type == RE_TOK_TYPE_HYPHEN) {
+//                    ERROR("Malformed range\n");
+//                    return NULL;
+//                }
+//
+//                // Check if we're dealing with a range in format: [a-z]
+//                if (t0->type == RE_TOK_TYPE_HYPHEN) {
+//                    struct ReToken *t1 = POP();
+//                    struct ReToken tmp = re_token_new(RE_TOK_TYPE_RANGE);
+//                    tmp.c0 = t1->c0;
+//                    tmp.c1 = (*cclassp)->c0;
+//                    *t_out++ = tmp;
+//
+//                    if (i > 0)
+//                        *t_out++ = re_token_new(RE_TOK_TYPE_PIPE);
+//                }
+//                // It's not a range so we can easily rewrite: [abc] == (a|b|c)
+//                else {
+//                    PUSH(t0);
+//                    PUSH(*cclassp);
+//                }
+//            }
+//
+//            // empty stack into output buffer
+//            while (!STACK_IS_EMPTY()) {
+//                struct ReToken *tmp = POP();
+//                *t_out++ = *tmp;
+//                *t_out++ = re_token_new(RE_TOK_TYPE_PIPE);
+//            }
+//
+//            // remove extra pipe
+//            t_out--;
+//            *t_out++ = re_token_new(RE_TOK_TYPE_GROUP_END);
+//
+//            RESET_CCLASS();
+//        }
+//        // Add token to temporary cclass buffer
+//        else if (cclass.in_cclass) {
+//            cclass.tokens[cclass.size++] = t;
+//        }
+//        else {
+//            *t_out++ = *t;
+//        }
+//    }
+//    memcpy(tokens, out_buf, size*sizeof(struct ReToken));
+//    return tokens;
+//
+//    #undef STACK_IS_EMPTY
+//    #undef PUSH
+//    #undef POP
+//    #undef RESET_CCLASS
+//}
 
 struct ReToken* re_to_explicit_cat(struct ReToken *tokens, size_t size)
 {
@@ -677,7 +773,7 @@ struct ReToken* re_to_explicit_cat(struct ReToken *tokens, size_t size)
                         return NULL;
                     }
                     else {
-                        *outp++ = (struct ReToken){.type=RE_TOK_TYPE_CONCAT, .negated=0};
+                        *outp++ = (struct ReToken){.type=RE_TOK_TYPE_CONCAT};
                     }
             }
         }
@@ -739,8 +835,8 @@ int infix_to_postfix(struct ReToken *tokens, struct ReToken *buf, size_t size)
                 while ((op = POP()).type != RE_TOK_TYPE_GROUP_START)
                     PUSH_OUT(op);
                 for (int i=0 ; i<op_pipe ; i++) {
-                    struct ReToken t_pipe = {.type=RE_TOK_TYPE_PIPE, .negated=0};
-                    PUSH_OUT(t_pipe);
+                    struct ReToken *t_pipe = (re_token_new(RE_TOK_TYPE_PIPE));
+                    PUSH_OUT(*t_pipe);
                 }
                 op_pipe = 0;
                 break;
@@ -778,8 +874,8 @@ int infix_to_postfix(struct ReToken *tokens, struct ReToken *buf, size_t size)
 
     // put pipes
     for (int i=0 ; i<op_pipe ; i++) {
-        struct ReToken t_pipe = {.type=RE_TOK_TYPE_PIPE, .negated=0};
-        PUSH_OUT(t_pipe);
+        struct ReToken *t_pipe = (re_token_new(RE_TOK_TYPE_PIPE));
+        PUSH_OUT(*t_pipe);
     }
 
     return 0;
@@ -896,11 +992,30 @@ static const char* re_token_type_to_str(enum ReTokenType type)
     return buf;
 }
 
-int re_match_list_has_token(struct MatchList *clist, struct MatchList *nlist, char c, int n)
+int re_match_class(struct State *s, char c)
+{
+    struct ReToken *t = s->t;
+    //t = t->next;
+    while (t != NULL) {
+        DEBUG("BEVER: %s\n", re_token_to_str(t));
+        //struct MatchList clist = re_match_list_init();
+        //struct MatchList nlist = re_match_list_init();
+        //re_match_list_append(&clist, s);
+        //if (re_match_list_has_token(&clist, &nlist, c, 0)) {
+        //    DEBUG("FUND MATCHING TOKEN &&&&&&&&&&&&\n");
+        //    return 1;
+        //}
+        t = t->next;
+    }
+    return 0;
+}
+
+static int re_match_list_has_token(struct MatchList *clist, struct MatchList *nlist, char c, int n)
 {
     /* Look for state->t that match given char. Add matches to nlist.
      * Returns amount of matches. */
     struct State **s = clist->states;
+    struct ReToken *tmp;
 
     for (int i=0 ; i<clist->n ; i++, s++) {
         switch ((*s)->t->type) {
@@ -956,6 +1071,16 @@ int re_match_list_has_token(struct MatchList *clist, struct MatchList *nlist, ch
             case RE_TOK_TYPE_NON_DIGIT:
                 if (!re_is_digit(c)) {
                     DEBUG("%s %s\n", re_token_type_to_str((*s)->t->type), re_token_to_str((*s)->t));
+                    re_match_list_append(nlist, (*s)->out);
+                    re_match_list_append(nlist, (*s)->out1);
+                }
+                break;
+            case RE_TOK_TYPE_CCLASS_NEGATED:
+                DEBUG("Match against negated cclass\n");
+                break;
+            case RE_TOK_TYPE_CCLASS:
+                DEBUG("Match against cclass\n");
+                if (re_match_class(*s, c)) {
                     re_match_list_append(nlist, (*s)->out);
                     re_match_list_append(nlist, (*s)->out1);
                 }
