@@ -185,15 +185,21 @@ struct MatchList {
     int n;
 };
 
+struct TokenList {
+    struct ReToken *tokens[MAX_REGEX];
+    int n;
+};
+
 int re_match(struct NFA *nfa, const char *str, char *buf, size_t bufsiz);
-struct State* nfa_compile(struct NFA *nfa, struct ReToken *tokens);
+struct State* nfa_compile(struct NFA *nfa, struct TokenList *tl);
 void re_state_debug(struct State *s, int level);
-struct ReToken* tokenize(const char *expr, struct ReToken *buf, size_t size);
+struct TokenList* tokenize(const char *expr, struct TokenList *tl);
 struct NFA nfa_init();
-struct ReToken* re2post(struct ReToken *tokens, size_t size);
+struct TokenList* re2post(struct TokenList *tl_in, struct TokenList *tl_out);
 struct ReToken* re_rewrite_range(struct ReToken *tokens, size_t size);
-void re_debug_reg(struct ReToken *tokens);
-struct ReToken* re_parse_cclass(struct ReToken *tokens, size_t size);
+void re_tokenlist_debug(struct TokenList *tl);
+struct TokenList* re_parse_cclass(struct TokenList *tl_int, struct TokenList *tl_out);
+struct TokenList re_tokenlist_init();
 
 
 #endif

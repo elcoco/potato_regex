@@ -19,14 +19,15 @@ static char* re_token_to_str(struct  ReToken *t);
 static const char* re_token_type_to_str(enum ReTokenType type);
 static int re_match_list_has_token(struct MatchList *clist, struct MatchList *nlist, char c, int n);
 
-static struct ReToken tpool[MAX_TOKEN_POOL];
-static int tpool_n = 0;
+struct ReToken tpool[MAX_TOKEN_POOL];
+int tpool_n = 0;
 
 
 static struct ReToken* re_token_new(enum ReTokenType type)
 {
     /* Get new token from pool */
-    struct ReToken *t = &(tpool[tpool_n++]);
+    //struct ReToken *t = &(tpool[tpool_n++]);
+    struct ReToken *t = tpool + tpool_n++;
     memset(t, 0, sizeof(struct ReToken));
     t->type = type;
     return t;
@@ -156,7 +157,7 @@ static struct OutList* outlist_join(struct OutList *l0, struct OutList *l1)
     return bak;
 }
 
-struct State* nfa_compile(struct NFA *nfa, struct ReToken *tokens)
+struct State* nfa_compile(struct NFA *nfa, struct TokenList *tl)
 {
     /* Create NFA from pattern */
 
@@ -189,14 +190,15 @@ struct State* nfa_compile(struct NFA *nfa, struct ReToken *tokens)
 
     //DEBUG("Compiling pattern: '%s'\n", pattern);
 
-    for (struct ReToken *t=tokens ; t->type != RE_TOK_TYPE_UNDEFINED ; t++) {
+    struct ReToken **t = tl->tokens;
+    for (int i=0 ; i<tl->n ; i++, t++) {
 
         //for (int i=0 ; i<stackp-stack ; i++) {
         //    DEBUG("GROUP: %d ******************************\n", i);
         //    re_state_debug(stack[i].start, 0);
         //}
 
-        switch (t->type) {
+        switch ((*t)->type) {
             case RE_TOK_TYPE_CONCAT:       // concat
                 g1 = POP();
                 g0 = POP();
@@ -208,7 +210,7 @@ struct State* nfa_compile(struct NFA *nfa, struct ReToken *tokens)
             case RE_TOK_TYPE_QUESTION:       // zero or one
                 g = POP();
                 DEBUG("TYPE: QUESTION: %c\n", g.start->t->c0);
-                s = nfa_state_init(nfa, t, STATE_TYPE_SPLIT, g.start, NULL);
+                s = nfa_state_init(nfa, *t, STATE_TYPE_SPLIT, g.start, NULL);
                 l = ol_init(GET_OL(), &s->out1);
                 l = outlist_join(g.out, l);
                 g = group_init(s, l);
@@ -218,7 +220,7 @@ struct State* nfa_compile(struct NFA *nfa, struct ReToken *tokens)
                 g1 = POP();
                 g0 = POP();
                 DEBUG("TYPE: PIPE:   %c | %c\n", g0.start->t->c0, g1.start->t->c0);
-                s = nfa_state_init(nfa, t, STATE_TYPE_SPLIT, g0.start, g1.start);
+                s = nfa_state_init(nfa, *t, STATE_TYPE_SPLIT, g0.start, g1.start);
                 l = outlist_join(g0.out, g1.out);
                 PUSH(group_init(s, l));
 
@@ -226,7 +228,7 @@ struct State* nfa_compile(struct NFA *nfa, struct ReToken *tokens)
             case RE_TOK_TYPE_STAR:       // zero or more
                 g = POP();
                 DEBUG("TYPE: STAR:   %c\n", g.start->t->c0);
-                s = nfa_state_init(nfa, t, STATE_TYPE_SPLIT, g.start, NULL);
+                s = nfa_state_init(nfa, *t, STATE_TYPE_SPLIT, g.start, NULL);
                 group_patch_outlist(&g, &s);
                 l = ol_init(GET_OL(), &s->out1);
                 PUSH(group_init(g.start, l));
@@ -234,14 +236,14 @@ struct State* nfa_compile(struct NFA *nfa, struct ReToken *tokens)
             case RE_TOK_TYPE_PLUS:       // one or more
                 g = POP();
                 DEBUG("TYPE: PLUS:   %c\n", g.start->t->c0);
-                s = nfa_state_init(nfa, t, STATE_TYPE_SPLIT, g.start, NULL);
+                s = nfa_state_init(nfa, *t, STATE_TYPE_SPLIT, g.start, NULL);
                 group_patch_outlist(&g, &s);
                 l = ol_init(GET_OL(), &s->out1);
                 PUSH(group_init(s, l));
                 break;
             default:        // it is a normal character
-                DEBUG("TYPE: CHAR:   %c\n", t->c0);
-                s = nfa_state_init(nfa, t, STATE_TYPE_NONE, NULL, NULL);
+                DEBUG("TYPE: CHAR:   %c\n", (*t)->c0);
+                s = nfa_state_init(nfa, *t, STATE_TYPE_NONE, NULL, NULL);
                 l = ol_init(GET_OL(), &s->out);
                 g = group_init(s, l);
                 PUSH(g);
@@ -265,11 +267,31 @@ struct State* nfa_compile(struct NFA *nfa, struct ReToken *tokens)
     #undef GET_OL
 }
 
-struct ReToken* re2post(struct ReToken *tokens, size_t size)
+struct TokenList re_tokenlist_init()
 {
-    struct ReToken out[size];
-    memset(&out, 0, sizeof(struct ReToken) * size);
-    struct ReToken *outp = out;
+    struct TokenList tl;
+    for (int i=0 ; i<MAX_REGEX ; i++) {
+        tl.tokens[i] = NULL;
+    }
+    tl.n = 0;
+    return tl;
+}
+
+int re_tokenlist_append(struct TokenList *tl, struct ReToken *t)
+{
+    if (tl->n >= MAX_REGEX) {
+        ERROR("List full, max=%d\n", MAX_REGEX);
+        return -1;
+    }
+
+    tl->tokens[tl->n++] = t;
+    return 1;
+
+}
+
+struct TokenList* re2post(struct TokenList *tl_in, struct TokenList *tl_out)
+{
+    //memset(out, 0, sizeof(struct ReToken) * size);
     struct ReToken *tcat = (re_token_new(RE_TOK_TYPE_CONCAT));
     struct ReToken *tpipe = (re_token_new(RE_TOK_TYPE_PIPE));
     //struct ReToken tcat = {.type=RE_TOK_TYPE_CONCAT, .c0=CONCAT_SYM};
@@ -292,14 +314,16 @@ struct ReToken* re2post(struct ReToken *tokens, size_t size)
 //		return NULL;
 
 	//for (; *re; re++) {
-	for (struct ReToken *t=tokens; t->type != RE_TOK_TYPE_UNDEFINED; t++) {
+    struct ReToken **t = tl_in->tokens;
+	for (int i=0; i<tl_in->n; i++,t++) {
 
-		switch(t->type) {
+		switch((*t)->type) {
 
             case RE_TOK_TYPE_GROUP_START:
                 if (natom > 1){
                     --natom;
-                    *outp++ = *tcat;
+                    if (!re_tokenlist_append(tl_out, tcat))
+                        return NULL;
                 }
                 if (p >= paren+100)
                     return NULL;
@@ -312,8 +336,10 @@ struct ReToken* re2post(struct ReToken *tokens, size_t size)
             case RE_TOK_TYPE_PIPE:
                 if (natom == 0)
                     return NULL;
-                while (--natom > 0)
-                    *outp++ = *tcat;
+                while (--natom > 0) {
+                    if (!re_tokenlist_append(tl_out, tcat))
+                        return NULL;
+                }
                 nalt++;
                 break;
             case RE_TOK_TYPE_GROUP_END:
@@ -321,10 +347,14 @@ struct ReToken* re2post(struct ReToken *tokens, size_t size)
                     return NULL;
                 if (natom == 0)
                     return NULL;
-                while (--natom > 0)
-                    *outp++ = *tcat;
-                for (; nalt > 0; nalt--)
-                    *outp++ = *tpipe;
+                while (--natom > 0) {
+                    if (!re_tokenlist_append(tl_out, tcat))
+                        return NULL;
+                }
+                for (; nalt > 0; nalt--) {
+                    if (!re_tokenlist_append(tl_out, tpipe))
+                        return NULL;
+                }
                 --p;
                 nalt = p->nalt;
                 natom = p->natom;
@@ -335,27 +365,33 @@ struct ReToken* re2post(struct ReToken *tokens, size_t size)
             case RE_TOK_TYPE_QUESTION:
                 if (natom == 0)
                     return NULL;
-                *outp++ = *t;
+                if (!re_tokenlist_append(tl_out, *t))
+                    return NULL;
                 break;
             default:
                 if (natom > 1){
                     --natom;
-                    *outp++ = *tcat;
+                    if (!re_tokenlist_append(tl_out, tcat))
+                        return NULL;
                 }
-                *outp++ = *t;
+                if (!re_tokenlist_append(tl_out, *t))
+                    return NULL;
                 natom++;
                 break;
             }
 	}
 	if (p != paren)
 		return NULL;
-	while (--natom > 0)
-		*outp++ = *tcat;
-	for (; nalt > 0; nalt--)
-		*outp++ = *tpipe;
+	while (--natom > 0) {
+		if (!re_tokenlist_append(tl_out, tcat))
+            return NULL;
+    }
+	for (; nalt > 0; nalt--) {
+		if (!re_tokenlist_append(tl_out, tpipe))
+            return NULL;
+    }
 
-    memcpy(tokens, out, size);
-	return tokens;
+	return tl_out;
 }
 
 static struct ReToken* re_str_to_token(const char **s)
@@ -524,48 +560,43 @@ static char* re_token_to_str(struct  ReToken *t)
     return buf;
 }
 
-void re_debug_reg(struct ReToken *tokens)
+void re_tokenlist_debug(struct TokenList *tl)
 {
     /* Print out token array */
-    struct ReToken *t = tokens;
-    while (t->type != RE_TOK_TYPE_UNDEFINED) {
+    struct ReToken **t = tl->tokens;
+    for (int i=0 ; i<tl->n ; i++, t++) {
 
-        if (t != tokens)
+        if (t != tl->tokens)
             printf(" ");
 
-        printf("%s", re_token_to_str(t));
-        t++;
+        printf("%s", re_token_to_str(*t));
     }
     printf("\n");
 }
 
-struct ReToken* tokenize(const char *expr, struct ReToken *buf, size_t size)
+struct TokenList* tokenize(const char *expr, struct TokenList *tl)
 {
-    struct ReToken *p_out = buf;
     const char **p_in = &expr;
-    unsigned int i = 0;
 
     while (strlen(*p_in)) {
         struct ReToken *t = re_str_to_token(p_in);
+        DEBUG("Found token: %c\n", t->c0);
 
         assert(t->type != RE_TOK_TYPE_UNDEFINED);
-        if (i >= size) {
-            ERROR("Max tokensize reached: %ld\n", size);
+        if (re_tokenlist_append(tl, t) < 0)
             return NULL;
-        }
-        *p_out++ = *t;
-        i++;
     }
-    return buf;
+    return tl;
 }
 
-struct ReToken* re_parse_cclass(struct ReToken *tokens, size_t size)
+struct TokenList* re_parse_cclass(struct TokenList *tl_in, struct TokenList *tl_out)
 {
-    struct ReToken *t = tokens;
-
-    struct ReToken out_buf[size];
-    struct ReToken *t_out = out_buf;
-    memset(&out_buf, 0, sizeof(struct ReToken) * size);
+    /* Parse tokens in character class.
+     * Create a token of the RE_TOK_TYPE_CCLASS and move all tokens from within the character class
+     * into a linked list.
+     * If ^ is at start, set RE_TOK_TYPE_CCLASS_NEGATED
+     */
+    struct ReToken **t = tl_in->tokens;
 
     // Temporary buffer for tokens inside cclass
     struct Cclass {
@@ -578,28 +609,29 @@ struct ReToken* re_parse_cclass(struct ReToken *tokens, size_t size)
     #define RESET_CCLASS() memset(&cclass, 0, sizeof(struct Cclass))
     RESET_CCLASS();
 
-    for (; t->type!=RE_TOK_TYPE_UNDEFINED ; t++) {
-        if (t->type == RE_TOK_TYPE_CCLASS_START) {
+    for (int i=0 ; i<tl_in->n ; i++, t++) {
+        if ((*t)->type == RE_TOK_TYPE_CCLASS_START) {
             DEBUG("START OF CCLASS\n");
             cclass.in_cclass = 1;
         }
-        else if (t->type == RE_TOK_TYPE_CCLASS_END) {
+        else if ((*t)->type == RE_TOK_TYPE_CCLASS_END) {
             if (!cclass.in_cclass) {
                 DEBUG("Malformatted cclass\n");
                 return NULL;
             }
 
             DEBUG("END OF CCLASS\n");
-            struct ReToken t_cclass;
-            t_cclass.c0='x';
+            struct ReToken *t_cclass;
 
             if (cclass.is_negated)
-                t_cclass.type=RE_TOK_TYPE_CCLASS_NEGATED;
+                t_cclass = re_token_new(RE_TOK_TYPE_CCLASS_NEGATED);
             else
-                t_cclass.type=RE_TOK_TYPE_CCLASS;
+                t_cclass = re_token_new(RE_TOK_TYPE_CCLASS);
+
+            t_cclass->c0 = 'x';
 
             struct ReToken **cur = cclass.tokens;
-            struct ReToken *tcclassp = &t_cclass;
+            struct ReToken *tcclassp = t_cclass;
             struct ReToken **prev = &tcclassp;
 
             for (; *cur != NULL && (*cur)->type != RE_TOK_TYPE_UNDEFINED ; cur++) {
@@ -609,26 +641,28 @@ struct ReToken* re_parse_cclass(struct ReToken *tokens, size_t size)
                 prev = cur;
             }
 
-            *t_out++ = t_cclass;
+            if (!re_tokenlist_append(tl_out, t_cclass))
+                return NULL;
+
             RESET_CCLASS();
 
-            struct ReToken *tcclass = t_cclass.next;
+            struct ReToken *tcclass = t_cclass->next;
         }
-        else if (cclass.in_cclass && cclass.size == 0 && t->type == RE_TOK_TYPE_CARET) {
+        else if (cclass.in_cclass && cclass.size == 0 && (*t)->type == RE_TOK_TYPE_CARET) {
             DEBUG("IS NEGATED\n");
             cclass.is_negated = 1;
         }
         else if (cclass.in_cclass) {
-            cclass.tokens[cclass.size++] = t;
-            DEBUG("CCLASS TOKEN: %s, %s\n", re_token_type_to_str(t->type), re_token_to_str(t));
+            cclass.tokens[cclass.size++] = *t;
+            DEBUG("CCLASS TOKEN: %s, %s\n", re_token_type_to_str((*t)->type), re_token_to_str(*t));
         }
         else {
-            DEBUG("COPY TOKEN: %s, %s\n", re_token_type_to_str(t->type), re_token_to_str(t));
-            *t_out++ = *t;
+            DEBUG("COPY TOKEN: %s, %s\n", re_token_type_to_str((*t)->type), re_token_to_str(*t));
+            if (!re_tokenlist_append(tl_out, *t))
+                return NULL;
         }
     }
-    memcpy(tokens, out_buf, size*sizeof(struct ReToken));
-    return tokens;
+    return tl_out;
 }
 
 
