@@ -19,6 +19,8 @@ static char* re_token_to_str(struct  ReToken *t);
 static const char* re_token_type_to_str(enum ReTokenType type);
 static int re_match_list_has_token(struct MatchList *clist, struct MatchList *nlist, char c, int n);
 
+static int re_match_class(struct ReToken *t, char c);
+
 struct ReToken tpool[MAX_TOKEN_POOL];
 int tpool_n = 0;
 
@@ -505,18 +507,23 @@ static struct ReToken* re_str_to_token(const char **s)
 
 static char* re_token_to_str(struct  ReToken *t)
 {
-    static char buf[32] = "";
+    /* Get string representation of token */
+    static char buf[MAX_TOKEN_STR_REPR] = "";
     struct ReToken *tcclass;
     buf[0] = '\0';
-    /* Get string representation of token */
     switch (t->type) {
-        //case RE_TOK_TYPE_CCLASS:
-        //    tcclass = t;
-        //    while (tcclass != NULL) {
-        //        snprintf(buf, sizeof(buf), "%s->%s'%c'%s", buf, PRRED, tcclass->c0, PRRESET);
-        //        tcclass = tcclass->next;
-        //    }
-        //    break;
+        case RE_TOK_TYPE_CCLASS:
+        case RE_TOK_TYPE_CCLASS_NEGATED:
+            tcclass = t->next;
+            char tmp[MAX_TOKEN_STR_REPR] = "";
+            while (tcclass != NULL) {
+                if (tcclass != t->next)
+                    strncat(tmp, " -> ", sizeof(tmp) - strlen(tmp) -1);
+                strncat(tmp, re_token_to_str(tcclass), sizeof(tmp) - strlen(tmp) -1);
+                tcclass = tcclass->next;
+            }
+            memcpy(buf, tmp, sizeof(buf));
+            break;
         case RE_TOK_TYPE_CONCAT:
             snprintf(buf, sizeof(buf), "%s%c%s", PRRED, CONCAT_SYM, PRRESET);
             break;
@@ -1020,27 +1027,61 @@ int re_is_in_range(char c, char lc, char rc)
 
 static const char* re_token_type_to_str(enum ReTokenType type)
 {
-    static char buf[32] = "";
+    static char buf[MAX_TOKEN_TYPE_STR_REPR] = "";
     buf[0]= '\0';
     snprintf(buf, sizeof(buf)-1, "%s%s%s", PRBLUE, token_type_table[type], PRRESET);
     return buf;
 }
 
-int re_match_class(struct State *s, char c)
+int re_match_token(struct ReToken *t, char c)
 {
-    struct ReToken *t = s->t;
-    //t = t->next;
+    /* Check if token matches char */
+    switch (t->type) {
+        case RE_TOK_TYPE_RANGE:
+            return re_is_in_range(c, t->c0, t->c1);
+        case RE_TOK_TYPE_DOT:
+            return !re_is_linebreak(c);
+        case RE_TOK_TYPE_SPACE:
+            return re_is_whitespace(c);
+        case RE_TOK_TYPE_NON_SPACE:
+            return !re_is_whitespace(c);
+        case RE_TOK_TYPE_ALPHA_NUM:
+            return re_is_alpha(c);
+        case RE_TOK_TYPE_NON_ALPHA_NUM:
+            return !re_is_alpha(c);
+        case RE_TOK_TYPE_DIGIT:
+            return re_is_digit(c);
+        case RE_TOK_TYPE_NON_DIGIT:
+            return !re_is_digit(c);
+        case RE_TOK_TYPE_CCLASS_NEGATED:
+        case RE_TOK_TYPE_CCLASS:
+            return re_match_class(t, c);
+        case RE_TOK_TYPE_CHAR:
+            return t->c0 == c;
+        default:
+            ERROR("UNHANDLED: TYPE: %s, %s\n", re_token_type_to_str(t->type), re_token_to_str(t));
+            return 0;
+    }
+}
+
+static int re_match_class(struct ReToken *token, char c)
+{
+    /* Check char against full character class.
+     * Depending on type, it checks for negated or non negated */
+    struct ReToken *t = token->next;
+    int has_match = 0;
     while (t != NULL) {
-        DEBUG("BEVER: %s\n", re_token_to_str(t));
-        //struct MatchList clist = re_match_list_init();
-        //struct MatchList nlist = re_match_list_init();
-        //re_match_list_append(&clist, s);
-        //if (re_match_list_has_token(&clist, &nlist, c, 0)) {
-        //    DEBUG("FUND MATCHING TOKEN &&&&&&&&&&&&\n");
-        //    return 1;
-        //}
+        if (re_match_token(t, c)) {
+            if (token->type == RE_TOK_TYPE_CCLASS)
+                return 1;
+            else
+                has_match = 1;
+        }
         t = t->next;
     }
+    if (token->type == RE_TOK_TYPE_CCLASS_NEGATED)
+        return !has_match;
+
     return 0;
 }
 
@@ -1052,83 +1093,10 @@ static int re_match_list_has_token(struct MatchList *clist, struct MatchList *nl
     struct ReToken *tmp;
 
     for (int i=0 ; i<clist->n ; i++, s++) {
-        switch ((*s)->t->type) {
-            case RE_TOK_TYPE_RANGE:
-                if (re_is_in_range(c, (*s)->t->c0, (*s)->t->c1)) {
-                    DEBUG("%s: %c > %c < %c\n", re_token_type_to_str((*s)->t->type), (*s)->t->c0, c, (*s)->t->c1);
-                    re_match_list_append(nlist, (*s)->out);
-                    re_match_list_append(nlist, (*s)->out1);
-                }
-                break;
-            case RE_TOK_TYPE_DOT:
-                if (!re_is_linebreak(c)) {
-                    DEBUG("%s %s\n", re_token_type_to_str((*s)->t->type), re_token_to_str((*s)->t));
-                    re_match_list_append(nlist, (*s)->out);
-                    re_match_list_append(nlist, (*s)->out1);
-                }
-                break;
-            case RE_TOK_TYPE_SPACE:
-                if (re_is_whitespace(c)) {
-                    DEBUG("%s %s\n", re_token_type_to_str((*s)->t->type), re_token_to_str((*s)->t));
-                    re_match_list_append(nlist, (*s)->out);
-                    re_match_list_append(nlist, (*s)->out1);
-                }
-                break;
-            case RE_TOK_TYPE_NON_SPACE:
-                if (!re_is_whitespace(c)) {
-                    DEBUG("%s %s\n", re_token_type_to_str((*s)->t->type), re_token_to_str((*s)->t));
-                    re_match_list_append(nlist, (*s)->out);
-                    re_match_list_append(nlist, (*s)->out1);
-                }
-                break;
-            case RE_TOK_TYPE_ALPHA_NUM:
-                if (re_is_alpha(c)) {
-                    DEBUG("%s %s\n", re_token_type_to_str((*s)->t->type), re_token_to_str((*s)->t));
-                    re_match_list_append(nlist, (*s)->out);
-                    re_match_list_append(nlist, (*s)->out1);
-                }
-                break;
-            case RE_TOK_TYPE_NON_ALPHA_NUM:
-                if (!re_is_alpha(c)) {
-                    DEBUG("%s %s\n", re_token_type_to_str((*s)->t->type), re_token_to_str((*s)->t));
-                    re_match_list_append(nlist, (*s)->out);
-                    re_match_list_append(nlist, (*s)->out1);
-                }
-                break;
-            case RE_TOK_TYPE_DIGIT:
-                if (re_is_digit(c)) {
-                    DEBUG("%s %s\n", re_token_type_to_str((*s)->t->type), re_token_to_str((*s)->t));
-                    re_match_list_append(nlist, (*s)->out);
-                    re_match_list_append(nlist, (*s)->out1);
-                }
-                break;
-            case RE_TOK_TYPE_NON_DIGIT:
-                if (!re_is_digit(c)) {
-                    DEBUG("%s %s\n", re_token_type_to_str((*s)->t->type), re_token_to_str((*s)->t));
-                    re_match_list_append(nlist, (*s)->out);
-                    re_match_list_append(nlist, (*s)->out1);
-                }
-                break;
-            case RE_TOK_TYPE_CCLASS_NEGATED:
-                DEBUG("Match against negated cclass\n");
-                break;
-            case RE_TOK_TYPE_CCLASS:
-                DEBUG("Match against cclass\n");
-                if (re_match_class(*s, c)) {
-                    re_match_list_append(nlist, (*s)->out);
-                    re_match_list_append(nlist, (*s)->out1);
-                }
-                break;
-            case RE_TOK_TYPE_CHAR:
-                if ((*s)->t->c0 == c) {
-                    DEBUG("%s: %s\n", re_token_type_to_str((*s)->t->type), re_token_to_str((*s)->t));
-                    re_match_list_append(nlist, (*s)->out);
-                    re_match_list_append(nlist, (*s)->out1);
-                }
-                break;
-            default:
-                DEBUG("UNHANDLED: TYPE: %s, %s\n", re_token_type_to_str((*s)->t->type), re_token_to_str((*s)->t));
-                break;
+        if (re_match_token((*s)->t, c)) {
+            DEBUG("%s %s\n", re_token_type_to_str((*s)->t->type), re_token_to_str((*s)->t));
+            re_match_list_append(nlist, (*s)->out);
+            re_match_list_append(nlist, (*s)->out1);
         }
     }
     return nlist->n;

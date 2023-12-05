@@ -47,6 +47,10 @@ int main(int argc, char **argv)
     struct NFA nfa = nfa_init();
     nfa_compile(&nfa, &tokens_postfix);
     re_state_debug(nfa.start, 0);
+
+
+    // TODO when looking for matches, search cclass linked list
+    
     if (re_match(&nfa, input, result, MAX_STR_RESULT))
         DEBUG("RESULT: %s\n", result);
     return 1;

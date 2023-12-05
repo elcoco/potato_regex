@@ -33,6 +33,8 @@ extern int do_error;
 #define MAX_GROUP_STACK 256
 #define MAX_STATE_OUT   1024
 #define MAX_CCLASS   32
+#define MAX_TOKEN_STR_REPR 64
+#define MAX_TOKEN_TYPE_STR_REPR 64
 
 #define PRRESET   "\x1B[0m"
 #define PRRED     "\x1B[31m"
