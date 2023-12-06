@@ -26,15 +26,16 @@ extern int do_error;
 #define INFO(M, ...) if(do_info){fprintf(stdout, M, ##__VA_ARGS__);}
 #define ERROR(M, ...) if(do_error){fprintf(stderr, "[ERROR] (%s:%d) " M, __FILE__, __LINE__, ##__VA_ARGS__);}
 
-#define MAX_TOKEN_POOL  128
-#define MAX_STR_RESULT  128
-#define MAX_STATE_POOL  1024
-#define MAX_OUT_LIST_POOL  1024
-#define MAX_GROUP_STACK 256
-#define MAX_STATE_OUT   1024
-#define MAX_CCLASS   32
-#define MAX_TOKEN_STR_REPR 64
-#define MAX_TOKEN_TYPE_STR_REPR 64
+#define RE_MAX_TOKEN_POOL  128
+#define RE_MAX_STR_RESULT  128
+#define RE_MAX_STATE_POOL  1024
+#define RE_MAX_OUT_LIST_POOL  1024
+#define RE_MAX_GROUP_STACK 256
+#define RE_MAX_STATE_OUT   1024
+#define RE_MAX_CCLASS   32
+#define RE_MAX_TOKEN_STR_REPR 64
+#define RE_MAX_TOKEN_TYPE_STR_REPR 64
+#define RE_MAX_MATCH_LIST 256
 
 #define PRRESET   "\x1B[0m"
 #define PRRED     "\x1B[31m"
@@ -45,11 +46,11 @@ extern int do_error;
 #define PRCYAN    "\x1B[36m"
 #define PRWHITE   "\x1B[37m"
 
-#define MAX_REGEX 256
+#define RE_MAX_REGEX 256
 
-#define CONCAT_SYM '&'
-#define RE_SPACE_CHARS           " \t"
-#define RE_LINE_BREAK_CHARS           "\n\r"
+#define RE_CONCAT_SYM '&'
+#define RE_RE_SPACE_CHARS           " \t"
+#define RE_RE_LINE_BREAK_CHARS           "\n\r"
 
 
 /* Enum is ordered in order of precedence, do not change order!!!
@@ -145,62 +146,62 @@ struct ReToken {
     struct ReToken *next;
 };
 
-enum StateType {
+enum ReStateType {
     STATE_TYPE_NONE,   // this is a state that is a char or an operator
     STATE_TYPE_MATCH,   // no output
     STATE_TYPE_SPLIT,   // two outputs to next states
 };
 
-struct State {
+struct ReState {
     struct ReToken *t;
 
-    enum StateType type;          // indicate split or match state
+    enum ReStateType type;          // indicate split or match state
 
     // struct Token *token;
-    struct State *out;
-    struct State *out1;
+    struct ReState *out;
+    struct ReState *out1;
     unsigned char is_alloc;       // check if state is allocated
 };
 
 /* Holds links to endpoints of state chains that are part of a Group */
 struct OutList {
-    struct State **s;
+    struct ReState **s;
     struct OutList *next;
 };
 
 /* Holds State chains */
 struct Group {
-    struct State *start;
+    struct ReState *start;
     struct OutList *out;
     char is_alloc;
 };
 
-struct NFA {
-    struct State spool[MAX_STATE_POOL];
+struct Regex {
+    struct ReState spool[RE_MAX_STATE_POOL];
 
     // The first node in the NFA
-    struct State *start;
+    struct ReState *start;
 };
 
 struct MatchList {
-    struct State *states[256];
+    struct ReState *states[RE_MAX_MATCH_LIST];
     int n;
 };
 
 struct TokenList {
-    struct ReToken *tokens[MAX_REGEX];
+    struct ReToken *tokens[RE_MAX_REGEX];
     int n;
 };
 
-int re_match(struct NFA *nfa, const char *str, char *buf, size_t bufsiz);
-struct State* nfa_compile(struct NFA *nfa, struct TokenList *tl);
-void re_state_debug(struct State *s, int level);
-struct TokenList* tokenize(const char *expr, struct TokenList *tl);
-struct NFA nfa_init();
-struct TokenList* re2post(struct TokenList *tl_in, struct TokenList *tl_out);
+int re_match(struct Regex *re, const char *str, char *buf, size_t bufsiz);
+struct ReState* re_compile(struct Regex *re, struct TokenList *tl);
+void re_state_debug(struct ReState *s, int level);
+struct TokenList* re_tokenlist_from_str(const char *expr, struct TokenList *tl);
+struct Regex re_init();
+struct TokenList* re_tokenlist_to_postfix(struct TokenList *tl_in, struct TokenList *tl_out);
 struct ReToken* re_rewrite_range(struct ReToken *tokens, size_t size);
 void re_tokenlist_debug(struct TokenList *tl);
-struct TokenList* re_parse_cclass(struct TokenList *tl_int, struct TokenList *tl_out);
+struct TokenList* re_tokenlist_parse_cclass(struct TokenList *tl_int, struct TokenList *tl_out);
 struct TokenList re_tokenlist_init();
 
 

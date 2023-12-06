@@ -20,7 +20,7 @@ int main(int argc, char **argv)
 
     const char *expr = argv[1];
     const char *input = argv[2];
-    char result[MAX_STR_RESULT] = "";
+    char result[RE_MAX_STR_RESULT] = "";
 
     DEBUG("Parsing: %s\n", expr);
     struct TokenList tokens_infix = re_tokenlist_init();
@@ -29,29 +29,29 @@ int main(int argc, char **argv)
     //struct ReToken *tokens_infix[MAX_REGEX]; // regex chars with added concat symbols
     //struct ReToken **tokens_postfix;
     
-    if (tokenize(expr, &tokens_infix) == NULL)
+    if (re_tokenlist_from_str(expr, &tokens_infix) == NULL)
         return 1;
 
     DEBUG("INFIX:   "); re_tokenlist_debug(&tokens_infix);
 
-    if (re_parse_cclass(&tokens_infix, &tokens_infix_parsed) == NULL)
+    if (re_tokenlist_parse_cclass(&tokens_infix, &tokens_infix_parsed) == NULL)
         return 1;
 
     DEBUG("CCLASS:  "); re_tokenlist_debug(&tokens_infix_parsed);
 
-    if (re2post(&tokens_infix_parsed, &tokens_postfix) == NULL)
+    if (re_tokenlist_to_postfix(&tokens_infix_parsed, &tokens_postfix) == NULL)
         return 1;
 
     DEBUG("POSTFIX: "); re_tokenlist_debug(&tokens_postfix);
 
-    struct NFA nfa = nfa_init();
-    nfa_compile(&nfa, &tokens_postfix);
-    re_state_debug(nfa.start, 0);
+    struct Regex re = re_init();
+    re_compile(&re, &tokens_postfix);
+    re_state_debug(re.start, 0);
 
 
     // TODO when looking for matches, search cclass linked list
     
-    if (re_match(&nfa, input, result, MAX_STR_RESULT))
+    if (re_match(&re, input, result, RE_MAX_STR_RESULT))
         DEBUG("RESULT: %s\n", result);
     return 1;
 }
