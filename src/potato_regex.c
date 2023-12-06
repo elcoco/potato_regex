@@ -22,6 +22,7 @@ static int re_token_match_class(struct ReToken *t, char c);
 static int re_is_in_range(char c, char lc, char rc);
 static int re_token_match_chr(struct ReToken *t, char c);
 
+static struct ReState* re_compile(struct Regex *re, struct TokenList *tl);
 
 // Pool of token structs. We don't use malloc because in MCU's this can result in problems
 struct ReToken tpool[RE_MAX_TOKEN_POOL];
@@ -91,7 +92,6 @@ static int re_is_in_range(char c, char lc, char rc)
 }
 
 
-
 /* ///// STATE ///////////////////////////////////////
  * States are chained to form a tree like structure that we can use to match characters to.
  */
@@ -135,7 +135,7 @@ void re_state_debug(struct ReState *s, int level)
             if (s->t->type == RE_TOK_TYPE_PLUS || s->t->type == RE_TOK_TYPE_STAR) {
                 for (int i=0 ; i<level*spaces ; i++)
                     printf(" ");
-                printf("  NOT FOLLOWING: %s %s\n", re_token_type_to_str(s->out->t->type), re_token_to_str(s->out->t));
+                printf("  RECURSIVE: %s %s\n", re_token_type_to_str(s->out->t->type), re_token_to_str(s->out->t));
                 re_state_debug(s->out1, level+1);
                 return;
             }
@@ -259,7 +259,7 @@ static int re_match_list_has_token(struct MatchList *clist, struct MatchList *nl
 
     for (int i=0 ; i<clist->n ; i++, s++) {
         if (re_token_match_chr((*s)->t, c)) {
-            DEBUG("%s %s\n", re_token_type_to_str((*s)->t->type), re_token_to_str((*s)->t));
+            DEBUG("ACCEPTED: %s %s\n", re_token_type_to_str((*s)->t->type), re_token_to_str((*s)->t));
             re_match_list_append(nlist, (*s)->out);
             re_match_list_append(nlist, (*s)->out1);
         }
@@ -325,7 +325,6 @@ struct TokenList* re_tokenlist_from_str(const char *expr, struct TokenList *tl)
         struct ReToken *t = re_token_from_str(p_in);
         if (t == NULL)
             return NULL;
-        DEBUG("Found token: %c\n", t->c0);
 
         assert(t->type != RE_TOK_TYPE_UNDEFINED);
         if (re_tokenlist_append(tl, t) < 0)
@@ -381,8 +380,6 @@ struct TokenList* re_tokenlist_parse_cclass(struct TokenList *tl_in, struct Toke
 
             for (; *cur != NULL && (*cur)->type != RE_TOK_TYPE_UNDEFINED ; cur++) {
                 (*prev)->next = *cur;
-                DEBUG("Adding: %s", re_token_to_str(*prev));
-                printf("-> %s\n", re_token_to_str(*cur));
                 prev = cur;
             }
 
@@ -400,7 +397,6 @@ struct TokenList* re_tokenlist_parse_cclass(struct TokenList *tl_in, struct Toke
             DEBUG("CCLASS TOKEN: %s, %s\n", re_token_type_to_str((*t)->type), re_token_to_str(*t));
         }
         else {
-            DEBUG("COPY TOKEN: %s, %s\n", re_token_type_to_str((*t)->type), re_token_to_str(*t));
             if (!re_tokenlist_append(tl_out, *t))
                 return NULL;
         }
@@ -898,15 +894,35 @@ static struct ReToken* re_token_from_str(const char **s)
 
 
 ///// REGEX MAIN STRUCT //////////////////////////////////////////
-struct Regex re_init()
+struct Regex* re_init(struct Regex *re, const char *expr)
 {
-    /* initialize the main Regex struct */
-    struct Regex re;
-    memset(&re, 0, sizeof(struct Regex));
+    /* Initialize main struct.
+     * Tokenize expression.
+     * Convert tokens to postfix
+     * Compile tokens into NFA */
+    memset(re, 0, sizeof(struct Regex));
+
+    struct TokenList tokens_infix = re_tokenlist_init();
+    struct TokenList tokens_infix_parsed = re_tokenlist_init();
+    struct TokenList tokens_postfix = re_tokenlist_init();
+
+    if (re_tokenlist_from_str(expr, &tokens_infix) == NULL)
+        return NULL;
+
+    if (re_tokenlist_parse_cclass(&tokens_infix, &tokens_infix_parsed) == NULL)
+        return NULL;
+
+    if (re_tokenlist_to_postfix(&tokens_infix_parsed, &tokens_postfix) == NULL)
+        return NULL;
+
+    if (re_compile(re, &tokens_postfix) == NULL)
+        return NULL;
+
+    re_state_debug(re->start, 0);
     return re;
 }
 
-struct ReState* re_compile(struct Regex *re, struct TokenList *tl)
+static struct ReState* re_compile(struct Regex *re, struct TokenList *tl)
 {
     /* Create NFA from pattern */
 
@@ -951,14 +967,12 @@ struct ReState* re_compile(struct Regex *re, struct TokenList *tl)
             case RE_TOK_TYPE_CONCAT:       // concat
                 g1 = POP();
                 g0 = POP();
-                DEBUG("TYPE: CONCAT\n");
                 group_patch_outlist(&g0, &g1.start);
                 g = group_init(g0.start, g1.out);
                 PUSH(g);
                 break;
             case RE_TOK_TYPE_QUESTION:       // zero or one
                 g = POP();
-                DEBUG("TYPE: QUESTION: %c\n", g.start->t->c0);
                 s = re_state_init(re, *t, STATE_TYPE_SPLIT, g.start, NULL);
                 l = ol_init(GET_OL(), &s->out1);
                 l = outlist_join(g.out, l);
@@ -968,7 +982,6 @@ struct ReState* re_compile(struct Regex *re, struct TokenList *tl)
             case RE_TOK_TYPE_PIPE:       // alternate
                 g1 = POP();
                 g0 = POP();
-                DEBUG("TYPE: PIPE:   %c | %c\n", g0.start->t->c0, g1.start->t->c0);
                 s = re_state_init(re, *t, STATE_TYPE_SPLIT, g0.start, g1.start);
                 l = outlist_join(g0.out, g1.out);
                 PUSH(group_init(s, l));
@@ -976,7 +989,6 @@ struct ReState* re_compile(struct Regex *re, struct TokenList *tl)
                 break;
             case RE_TOK_TYPE_STAR:       // zero or more
                 g = POP();
-                DEBUG("TYPE: STAR:   %c\n", g.start->t->c0);
                 s = re_state_init(re, *t, STATE_TYPE_SPLIT, g.start, NULL);
                 group_patch_outlist(&g, &s);
                 l = ol_init(GET_OL(), &s->out1);
@@ -984,14 +996,12 @@ struct ReState* re_compile(struct Regex *re, struct TokenList *tl)
                 break;
             case RE_TOK_TYPE_PLUS:       // one or more
                 g = POP();
-                DEBUG("TYPE: PLUS:   %c\n", g.start->t->c0);
                 s = re_state_init(re, *t, STATE_TYPE_SPLIT, g.start, NULL);
                 group_patch_outlist(&g, &s);
                 l = ol_init(GET_OL(), &s->out1);
                 PUSH(group_init(s, l));
                 break;
             default:        // it is a normal character
-                DEBUG("TYPE: CHAR:   %c\n", (*t)->c0);
                 s = re_state_init(re, *t, STATE_TYPE_NONE, NULL, NULL);
                 l = ol_init(GET_OL(), &s->out);
                 g = group_init(s, l);
@@ -1016,10 +1026,26 @@ struct ReState* re_compile(struct Regex *re, struct TokenList *tl)
     #undef GET_OL
 }
 
-int re_match(struct Regex *re, const char *str, char *buf, size_t bufsiz)
+void re_match_debug(struct ReMatch *m)
+{
+    if (m->state >= 0) {
+        DEBUG("RESULT: %s\n", m->result);
+        DEBUG("START:  %d\n", m->istart);
+        DEBUG("END:    %d\n", m->iend);
+        DEBUG("ENDP:   %s\n", m->endp);
+    }
+    else {
+        DEBUG("Parsing failed\n");
+    }
+}
+
+struct ReMatch re_match(struct Regex *re, const char *str, char *buf, size_t bufsiz)
 {
     /* Run NFA state machine on string to check for a match */
     const char *c = str;
+    struct ReMatch m;
+    memset(&m, 0, sizeof(struct ReMatch));
+    m.state = -1;
 
     unsigned int i = 0;
 
@@ -1037,17 +1063,18 @@ int re_match(struct Regex *re, const char *str, char *buf, size_t bufsiz)
     // add first node
     re_match_list_append(clist, re->start);
 
+    DEBUG("INPUT STRING: %s\n", str);
+
     for (; *c ; c++) {
-        DEBUG("CUR CHAR: '%c'\n", *c);
+        DEBUG("MATCHING CHAR: '%c'\n", *c);
         *nlist = re_match_list_init();
 
         // Check all paths in clist and check for matches against c.
         // Add all matches to nlist so we can process them on the next run.
         if (re_match_list_has_token(clist, nlist, *c) > 0) {
-
             if (i>=bufsiz-1) {
                 ERROR("Ouput buffer full: %d, max=%ld\n", i, bufsiz);
-                return -1;
+                return m;
             }
 
             buf[i++] = *c;
@@ -1059,8 +1086,12 @@ int re_match(struct Regex *re, const char *str, char *buf, size_t bufsiz)
             nlist = bak;
 
             if (re_match_list_has_match(clist)) {
-                DEBUG("WE'VE GOT A MATCH!!!\n");
-                return 1;
+                m.endp = c;
+                m.iend = i-1;
+                m.state = 1;
+                m.result = buf;
+                DEBUG("SUCCESS\n");
+                return m;
             }
         }
         else {
@@ -1068,5 +1099,5 @@ int re_match(struct Regex *re, const char *str, char *buf, size_t bufsiz)
         }
     }
     DEBUG("No Match\n");
-    return 0;
+    return m;
 }

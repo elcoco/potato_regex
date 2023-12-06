@@ -23,35 +23,13 @@ int main(int argc, char **argv)
     char result[RE_MAX_STR_RESULT] = "";
 
     DEBUG("Parsing: %s\n", expr);
-    struct TokenList tokens_infix = re_tokenlist_init();
-    struct TokenList tokens_infix_parsed = re_tokenlist_init();
-    struct TokenList tokens_postfix = re_tokenlist_init();
-    //struct ReToken *tokens_infix[MAX_REGEX]; // regex chars with added concat symbols
-    //struct ReToken **tokens_postfix;
-    
-    if (re_tokenlist_from_str(expr, &tokens_infix) == NULL)
-        return 1;
 
-    DEBUG("INFIX:   "); re_tokenlist_debug(&tokens_infix);
+    struct Regex re;
+    re_init(&re, expr);
 
-    if (re_tokenlist_parse_cclass(&tokens_infix, &tokens_infix_parsed) == NULL)
-        return 1;
-
-    DEBUG("CCLASS:  "); re_tokenlist_debug(&tokens_infix_parsed);
-
-    if (re_tokenlist_to_postfix(&tokens_infix_parsed, &tokens_postfix) == NULL)
-        return 1;
-
-    DEBUG("POSTFIX: "); re_tokenlist_debug(&tokens_postfix);
-
-    struct Regex re = re_init();
-    re_compile(&re, &tokens_postfix);
-    re_state_debug(re.start, 0);
-
-
-    // TODO when looking for matches, search cclass linked list
-    
-    if (re_match(&re, input, result, RE_MAX_STR_RESULT))
-        DEBUG("RESULT: %s\n", result);
+    struct ReMatch m = re_match(&re, input, result, RE_MAX_STR_RESULT);
+    if (m.state >= 0) {
+        re_match_debug(&m);
+    }
     return 1;
 }

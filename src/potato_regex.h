@@ -18,6 +18,10 @@
  * https://www.youtube.com/watch?v=QzVVjboyb0s
  */
 
+// TODO: Greediness is not concidered when using * or +
+// TODO: Add ^ and $ for beginning/end of input string
+// TODO: Token pool should be stored inside Rexex struct
+
 extern int do_debug;
 extern int do_info;
 extern int do_error;
@@ -179,6 +183,9 @@ struct Group {
 struct Regex {
     struct ReState spool[RE_MAX_STATE_POOL];
 
+    // TODO make this do something
+    struct ReState tpool[RE_MAX_TOKEN_POOL];
+
     // The first node in the NFA
     struct ReState *start;
 };
@@ -193,16 +200,18 @@ struct TokenList {
     int n;
 };
 
-int re_match(struct Regex *re, const char *str, char *buf, size_t bufsiz);
-struct ReState* re_compile(struct Regex *re, struct TokenList *tl);
-void re_state_debug(struct ReState *s, int level);
-struct TokenList* re_tokenlist_from_str(const char *expr, struct TokenList *tl);
-struct Regex re_init();
-struct TokenList* re_tokenlist_to_postfix(struct TokenList *tl_in, struct TokenList *tl_out);
-struct ReToken* re_rewrite_range(struct ReToken *tokens, size_t size);
-void re_tokenlist_debug(struct TokenList *tl);
-struct TokenList* re_tokenlist_parse_cclass(struct TokenList *tl_int, struct TokenList *tl_out);
-struct TokenList re_tokenlist_init();
+/* Return struct from re_match() that holds information about the match */
+struct ReMatch {
+    char *result;       // the resulting string, data is owned by the caller of re_match
+    unsigned int istart;         // index of start of match
+    unsigned int iend;           // index of end of match
+    const char *endp;         // pointer to last character of match in input string;
+    char state;         // success/fail state of match
+};
 
+
+struct Regex* re_init(struct Regex *re, const char *expr);
+struct ReMatch re_match(struct Regex *re, const char *str, char *buf, size_t bufsiz);
+void re_match_debug(struct ReMatch *m);
 
 #endif
