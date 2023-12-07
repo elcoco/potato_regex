@@ -164,32 +164,23 @@ struct ReState {
     // struct Token *token;
     struct ReState *out;
     struct ReState *out1;
-    unsigned char is_alloc;       // check if state is allocated
+    unsigned char is_alloc;         // check if state is allocated
 };
 
-/* Holds links to endpoints of state chains that are part of a Group */
+/* Holds links to endpoints of NFA state chains that are part of a Group */
 struct OutList {
     struct ReState **s;
     struct OutList *next;
 };
 
-/* Holds State chains */
+/* Holds NFA State chains */
 struct Group {
     struct ReState *start;
     struct OutList *out;
     char is_alloc;
 };
 
-struct Regex {
-    struct ReState spool[RE_MAX_STATE_POOL];
-
-    // TODO make this do something
-    struct ReState tpool[RE_MAX_TOKEN_POOL];
-
-    // The first node in the NFA
-    struct ReState *start;
-};
-
+/* Internal struct used when simulating the NFA state machine */
 struct MatchList {
     struct ReState *states[RE_MAX_MATCH_LIST];
     int n;
@@ -198,6 +189,18 @@ struct MatchList {
 struct TokenList {
     struct ReToken *tokens[RE_MAX_REGEX];
     int n;
+    //struct ReState tpool[RE_MAX_TOKEN_POOL];
+};
+
+/* PUBLIC */
+struct Regex {
+    struct ReState spool[RE_MAX_STATE_POOL];
+
+    // Expression parsed into ReToken enums
+    struct TokenList tokens;
+
+    // The first node in the NFA
+    struct ReState *start;
 };
 
 /* Return struct from re_match() that holds information about the match */

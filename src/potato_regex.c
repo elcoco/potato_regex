@@ -502,6 +502,7 @@ struct TokenList* re_tokenlist_to_postfix(struct TokenList *tl_in, struct TokenL
 	return tl_out;
 }
 
+/*
 int re_tokenlist_to_postfix_old(struct ReToken *tokens, struct ReToken *buf, size_t size)
 {
     // USING:
@@ -602,6 +603,7 @@ int re_tokenlist_to_postfix_old(struct ReToken *tokens, struct ReToken *buf, siz
     #undef POP
     #undef PUSH_OUT
 }
+*/
 
 struct ReToken* re_tokenlist_to_explicit_cat_old(struct ReToken *tokens, size_t size)
 {
@@ -902,9 +904,10 @@ struct Regex* re_init(struct Regex *re, const char *expr)
      * Compile tokens into NFA */
     memset(re, 0, sizeof(struct Regex));
 
+    re->tokens = re_tokenlist_init();
     struct TokenList tokens_infix = re_tokenlist_init();
     struct TokenList tokens_infix_parsed = re_tokenlist_init();
-    struct TokenList tokens_postfix = re_tokenlist_init();
+    //struct TokenList tokens_postfix = re_tokenlist_init();
 
     if (re_tokenlist_from_str(expr, &tokens_infix) == NULL)
         return NULL;
@@ -912,10 +915,10 @@ struct Regex* re_init(struct Regex *re, const char *expr)
     if (re_tokenlist_parse_cclass(&tokens_infix, &tokens_infix_parsed) == NULL)
         return NULL;
 
-    if (re_tokenlist_to_postfix(&tokens_infix_parsed, &tokens_postfix) == NULL)
+    if (re_tokenlist_to_postfix(&tokens_infix_parsed, &re->tokens) == NULL)
         return NULL;
 
-    if (re_compile(re, &tokens_postfix) == NULL)
+    if (re_compile(re, &re->tokens) == NULL)
         return NULL;
 
     re_state_debug(re->start, 0);
