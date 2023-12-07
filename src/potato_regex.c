@@ -347,7 +347,8 @@ static int re_tokenlist_delete_at_index(struct TokenList *tl, int index)
     tl->n--;
     return 1;
 }
-static int re_tokenlist_insert(struct TokenList *tl, struct ReToken *t_after, struct ReToken *t, size_t max)
+
+static int re_tokenlist_insert(struct TokenList *tl, struct ReToken *t_after, struct ReToken *t, int max)
 {
     struct ReToken **t_cur = tl->tokens;
 
@@ -357,7 +358,7 @@ static int re_tokenlist_insert(struct TokenList *tl, struct ReToken *t_after, st
             DEBUG("INSERT AFTER: %s %s\n", re_token_type_to_str((*t_cur)->type), re_token_to_str(*t_cur));
 
             if (tl->n+1 > max) {
-                ERROR("Failed to insert token, buffer too small: %ld\n", max);
+                ERROR("Failed to insert token, buffer too small: %d\n", max);
                 return -1;
             }
 
@@ -373,12 +374,10 @@ static int re_tokenlist_insert(struct TokenList *tl, struct ReToken *t_after, st
     return 0;
 }
 
-static int re_tokenlist_insert_at_index(struct TokenList *tl, int index, struct ReToken *t, size_t max)
+static int re_tokenlist_insert_at_index(struct TokenList *tl, int index, struct ReToken *t, int max)
 {
-    struct ReToken **t_cur = tl->tokens;
-
     if (tl->n+1 > max) {
-        ERROR("Failed to insert token, buffer too small: %ld\n", max);
+        ERROR("Failed to insert token, buffer too small: %d\n", max);
         return -1;
     }
     if (index != 0 && index > tl->n-1) {
@@ -995,6 +994,10 @@ struct Regex* re_init(struct Regex *re, const char *expr)
      * Tokenize expression.
      * Convert tokens to postfix
      * Compile tokens into NFA */
+
+    // TODO use the re_tokenlist_*_at_index functions to edit the tokenlist so we don't have to
+    // allocate so much memory
+
     memset(re, 0, sizeof(struct Regex));
 
     re->tokens = re_tokenlist_init();
