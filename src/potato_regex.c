@@ -331,6 +331,22 @@ static int re_tokenlist_delete(struct TokenList *tl, struct ReToken *tdel)
     return found;
 }
 
+static int re_tokenlist_delete_at_index(struct TokenList *tl, int index)
+{
+    if (index > tl->n-1) {
+        ERROR("Failed to delete token, index out of bounds: %d>%d\n", index, tl->n-1);
+        return -1;
+    }
+
+    for (int i=index ; i<tl->n ; i++) {
+        if (i < tl->n-1)
+            *(tl->tokens+i) = *(tl->tokens+i+1);
+        else
+            break;
+    }
+    tl->n--;
+    return 1;
+}
 static int re_tokenlist_insert(struct TokenList *tl, struct ReToken *t_after, struct ReToken *t, size_t max)
 {
     struct ReToken **t_cur = tl->tokens;
@@ -346,13 +362,10 @@ static int re_tokenlist_insert(struct TokenList *tl, struct ReToken *t_after, st
             }
 
             // shift everything after found item to the right starting at the end
-            for (int j=tl->n-1 ; j>=i ; j--) {
+            for (int j=tl->n-1 ; j>=i ; j--)
                 *(tl->tokens+j+1) = *(tl->tokens+j);
-                printf("%d ", j);
-            }
             *(t_cur+1) = t;
             tl->n++;
-            printf("\n");
             return 1;
         }
     }
@@ -372,6 +385,8 @@ static int re_tokenlist_insert_at_index(struct TokenList *tl, int index, struct 
         ERROR("Failed to insert token, index out of bounds: %d>%d\n", index, tl->n-1);
         return -1;
     }
+
+    // shift everything at index to the right starting at the end
     for (int i=tl->n-1 ; i>=index ; i--)
         *(tl->tokens+i+1) = *(tl->tokens+i);
 
@@ -989,7 +1004,14 @@ struct Regex* re_init(struct Regex *re, const char *expr)
     if (re_tokenlist_from_str(expr, &tokens_infix) == NULL)
         return NULL;
 
-    struct ReToken *t = re_token_init(RE_TOK_TYPE_QUESTION);
+    //re_tokenlist_debug(&tokens_infix);
+    ////struct ReToken *t_after = tokens_infix.tokens[0];
+    ////struct ReToken *t = re_token_init(RE_TOK_TYPE_QUESTION);
+    //DEBUG("OLD LEN: %d\n", tokens_infix.n);
+    //re_tokenlist_delete_at_index(&tokens_infix, 5);
+    //DEBUG("NEW LEN: %d\n", tokens_infix.n);
+    //re_tokenlist_debug(&tokens_infix);
+
 
     if (re_tokenlist_parse_cclass(&tokens_infix, &tokens_infix_parsed) == NULL)
         return NULL;
