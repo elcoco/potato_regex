@@ -187,7 +187,7 @@ struct MatchList {
 };
 
 struct TokenList {
-    struct ReToken *tokens[RE_MAX_REGEX];
+    struct ReToken tokens[RE_MAX_REGEX];
     int n;
     //struct ReState tpool[RE_MAX_TOKEN_POOL];
 };
