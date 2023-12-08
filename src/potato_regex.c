@@ -337,6 +337,7 @@ static int re_tokenlist_delete_at_index(struct TokenList *tl, int index)
         ERROR("Failed to delete token, index out of bounds: %d>%d\n", index, tl->n-1);
         return -1;
     }
+    DEBUG("DELETE @ %d -> %s %s\n", index, re_token_type_to_str((*(tl->tokens+index))->type), re_token_to_str(*(tl->tokens+index)));
 
     for (int i=index ; i<tl->n ; i++) {
         if (i < tl->n-1)
@@ -385,6 +386,8 @@ static int re_tokenlist_insert_at_index(struct TokenList *tl, int index, struct 
         return -1;
     }
 
+    DEBUG("INSERT @ %d -> %s %s\n", index, re_token_type_to_str(t->type), re_token_to_str(t));
+
     // shift everything at index to the right starting at the end
     for (int i=tl->n-1 ; i>=index ; i--)
         *(tl->tokens+i+1) = *(tl->tokens+i);
@@ -425,7 +428,64 @@ struct TokenList* re_tokenlist_from_str(const char *expr, struct TokenList *tl)
     return tl;
 }
 
-struct TokenList* re_tokenlist_parse_cclass(struct TokenList *tl_in, struct TokenList *tl_out)
+struct TokenList* re_tokenlist_parse_cclass(struct TokenList *tl)
+{
+    /* Parse tokens in character class.
+     * Create a token of the RE_TOK_TYPE_CCLASS and move all tokens from within the character class
+     * into a linked list.
+     * If ^ is at start, set RE_TOK_TYPE_CCLASS_NEGATED
+     */
+
+    // Keep track of cclass
+    struct Cclass {
+        struct ReToken *t;
+        unsigned char in_cclass;
+        int size;
+    } cclass;
+
+    #define RESET_CCLASS() memset(&cclass, 0, sizeof(struct Cclass))
+    RESET_CCLASS();
+
+    for (int i=0 ; i<tl->n ; i++) {
+        struct ReToken *t = *(tl->tokens+i);
+
+        if (t->type == RE_TOK_TYPE_CCLASS_START) {
+            DEBUG("START OF CCLASS\n");
+            cclass.in_cclass = 1;
+            re_tokenlist_delete_at_index(tl, i);
+            cclass.t = re_token_init(RE_TOK_TYPE_CCLASS);
+            cclass.t->c0 = 'x';
+            re_tokenlist_insert_at_index(tl, i, cclass.t, RE_MAX_REGEX);
+        }
+        else if (t->type == RE_TOK_TYPE_CCLASS_END) {
+            if (!cclass.in_cclass) {
+                ERROR("Malformed character class, unexpected ']'\n");
+                return NULL;
+            }
+
+            DEBUG("END OF CCLASS\n");
+            re_tokenlist_delete_at_index(tl, i--);
+            RESET_CCLASS();
+
+        }
+        else if (cclass.in_cclass && cclass.size == 0 && t->type == RE_TOK_TYPE_CARET) {
+            DEBUG("IS NEGATED\n");
+            cclass.t->type = RE_TOK_TYPE_CCLASS_NEGATED;
+            re_tokenlist_delete_at_index(tl, i--);
+        }
+        else if (cclass.in_cclass) {
+            // Add token to linked list and remove from tokenlist
+            cclass.t->next = t;
+            cclass.t = cclass.t->next;
+            re_tokenlist_delete_at_index(tl, i);
+            cclass.size++;
+            i--;
+        }
+    }
+    return tl;
+}
+
+struct TokenList* re_tokenlist_parse_cclass_old(struct TokenList *tl_in, struct TokenList *tl_out)
 {
     /* Parse tokens in character class.
      * Create a token of the RE_TOK_TYPE_CCLASS and move all tokens from within the character class
@@ -496,7 +556,7 @@ struct TokenList* re_tokenlist_parse_cclass(struct TokenList *tl_in, struct Toke
     return tl_out;
 }
 
-struct TokenList* re_tokenlist_to_postfix(struct TokenList *tl_in, struct TokenList *tl_out)
+struct TokenList* re_tokenlist_to_postfix(struct TokenList *tl)
 {
     struct ReToken *tcat = (re_token_init(RE_TOK_TYPE_CONCAT));
     struct ReToken *tpipe = (re_token_init(RE_TOK_TYPE_PIPE));
@@ -514,15 +574,14 @@ struct TokenList* re_tokenlist_to_postfix(struct TokenList *tl_in, struct TokenL
 	nalt = 0;
 	natom = 0;
 
-    struct ReToken **t = tl_in->tokens;
-	for (int i=0; i<tl_in->n; i++,t++) {
-
-		switch((*t)->type) {
+	for (int i=0; i<tl->n; i++) {
+        struct ReToken *t = *(tl->tokens + i);
+		switch(t->type) {
 
             case RE_TOK_TYPE_GROUP_START:
                 if (natom > 1){
                     --natom;
-                    if (!re_tokenlist_append(tl_out, tcat))
+                    if (!re_tokenlist_insert_at_index(tl, i++, tcat, RE_MAX_REGEX))
                         return NULL;
                 }
                 if (p >= paren+100)
@@ -537,7 +596,9 @@ struct TokenList* re_tokenlist_to_postfix(struct TokenList *tl_in, struct TokenL
                 if (natom == 0)
                     return NULL;
                 while (--natom > 0) {
-                    if (!re_tokenlist_append(tl_out, tcat))
+                    if (!re_tokenlist_delete_at_index(tl, i++))
+                        return NULL;
+                    if (!re_tokenlist_insert_at_index(tl, i++, tcat, RE_MAX_REGEX))
                         return NULL;
                 }
                 nalt++;
@@ -548,11 +609,11 @@ struct TokenList* re_tokenlist_to_postfix(struct TokenList *tl_in, struct TokenL
                 if (natom == 0)
                     return NULL;
                 while (--natom > 0) {
-                    if (!re_tokenlist_append(tl_out, tcat))
+                    if (!re_tokenlist_insert_at_index(tl, i++, tcat, RE_MAX_REGEX))
                         return NULL;
                 }
                 for (; nalt > 0; nalt--) {
-                    if (!re_tokenlist_append(tl_out, tpipe))
+                    if (!re_tokenlist_insert_at_index(tl, i++, tpipe, RE_MAX_REGEX))
                         return NULL;
                 }
                 --p;
@@ -565,17 +626,13 @@ struct TokenList* re_tokenlist_to_postfix(struct TokenList *tl_in, struct TokenL
             case RE_TOK_TYPE_QUESTION:
                 if (natom == 0)
                     return NULL;
-                if (!re_tokenlist_append(tl_out, *t))
-                    return NULL;
                 break;
             default:
                 if (natom > 1){
                     --natom;
-                    if (!re_tokenlist_append(tl_out, tcat))
+                    if (!re_tokenlist_insert_at_index(tl, i++, tcat, RE_MAX_REGEX))
                         return NULL;
                 }
-                if (!re_tokenlist_append(tl_out, *t))
-                    return NULL;
                 natom++;
                 break;
             }
@@ -583,15 +640,15 @@ struct TokenList* re_tokenlist_to_postfix(struct TokenList *tl_in, struct TokenL
 	if (p != paren)
 		return NULL;
 	while (--natom > 0) {
-		if (!re_tokenlist_append(tl_out, tcat))
+		if (!re_tokenlist_append(tl, tcat))
             return NULL;
     }
 	for (; nalt > 0; nalt--) {
-		if (!re_tokenlist_append(tl_out, tpipe))
+		if (!re_tokenlist_append(tl, tpipe))
             return NULL;
     }
 
-	return tl_out;
+	return tl;
 }
 
 /*
@@ -992,35 +1049,26 @@ struct Regex* re_init(struct Regex *re, const char *expr)
 {
     /* Initialize main struct.
      * Tokenize expression.
+     * Parse tokens in cclass
      * Convert tokens to postfix
-     * Compile tokens into NFA */
-
-    // TODO use the re_tokenlist_*_at_index functions to edit the tokenlist so we don't have to
-    // allocate so much memory
+     * Compile tokens into NFA
+     * ...
+     * PROFIT! */
 
     memset(re, 0, sizeof(struct Regex));
 
     re->tokens = re_tokenlist_init();
-    struct TokenList tokens_infix = re_tokenlist_init();
-    struct TokenList tokens_infix_parsed = re_tokenlist_init();
 
-    if (re_tokenlist_from_str(expr, &tokens_infix) == NULL)
+    if (re_tokenlist_from_str(expr, &re->tokens) == NULL)
         return NULL;
 
-    //re_tokenlist_debug(&tokens_infix);
-    ////struct ReToken *t_after = tokens_infix.tokens[0];
-    ////struct ReToken *t = re_token_init(RE_TOK_TYPE_QUESTION);
-    //DEBUG("OLD LEN: %d\n", tokens_infix.n);
-    //re_tokenlist_delete_at_index(&tokens_infix, 5);
-    //DEBUG("NEW LEN: %d\n", tokens_infix.n);
-    //re_tokenlist_debug(&tokens_infix);
-
-
-    if (re_tokenlist_parse_cclass(&tokens_infix, &tokens_infix_parsed) == NULL)
+    if (re_tokenlist_parse_cclass(&re->tokens) == NULL)
         return NULL;
 
-    if (re_tokenlist_to_postfix(&tokens_infix_parsed, &re->tokens) == NULL)
+    if (re_tokenlist_to_postfix(&re->tokens) == NULL)
         return NULL;
+
+    re_tokenlist_debug(&re->tokens);
 
     if (re_compile(re, &re->tokens) == NULL)
         return NULL;
