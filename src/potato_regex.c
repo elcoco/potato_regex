@@ -452,10 +452,12 @@ struct TokenList* re_tokenlist_parse_cclass(struct TokenList *tl)
         if (t->type == RE_TOK_TYPE_CCLASS_START) {
             DEBUG("START OF CCLASS\n");
             cclass.in_cclass = 1;
-            re_tokenlist_delete_at_index(tl, i);
+            if (!re_tokenlist_delete_at_index(tl, i))
+                return NULL;
             cclass.t = re_token_init(RE_TOK_TYPE_CCLASS);
             cclass.t->c0 = 'x';
-            re_tokenlist_insert_at_index(tl, i, cclass.t, RE_MAX_REGEX);
+            if (!re_tokenlist_insert_at_index(tl, i, cclass.t, RE_MAX_REGEX))
+                return NULL;
         }
         else if (t->type == RE_TOK_TYPE_CCLASS_END) {
             if (!cclass.in_cclass) {
@@ -464,96 +466,28 @@ struct TokenList* re_tokenlist_parse_cclass(struct TokenList *tl)
             }
 
             DEBUG("END OF CCLASS\n");
-            re_tokenlist_delete_at_index(tl, i--);
+            if (!re_tokenlist_delete_at_index(tl, i--))
+                return NULL;
             RESET_CCLASS();
 
         }
         else if (cclass.in_cclass && cclass.size == 0 && t->type == RE_TOK_TYPE_CARET) {
             DEBUG("IS NEGATED\n");
             cclass.t->type = RE_TOK_TYPE_CCLASS_NEGATED;
-            re_tokenlist_delete_at_index(tl, i--);
+            if (!re_tokenlist_delete_at_index(tl, i--))
+                return NULL;
         }
         else if (cclass.in_cclass) {
             // Add token to linked list and remove from tokenlist
             cclass.t->next = t;
             cclass.t = cclass.t->next;
-            re_tokenlist_delete_at_index(tl, i);
+            if (!re_tokenlist_delete_at_index(tl, i))
+                return NULL;
             cclass.size++;
             i--;
         }
     }
     return tl;
-}
-
-struct TokenList* re_tokenlist_parse_cclass_old(struct TokenList *tl_in, struct TokenList *tl_out)
-{
-    /* Parse tokens in character class.
-     * Create a token of the RE_TOK_TYPE_CCLASS and move all tokens from within the character class
-     * into a linked list.
-     * If ^ is at start, set RE_TOK_TYPE_CCLASS_NEGATED
-     */
-    struct ReToken **t = tl_in->tokens;
-
-    // Temporary buffer for tokens inside cclass
-    struct Cclass {
-        unsigned char in_cclass;
-        struct ReToken *tokens[RE_MAX_CCLASS];
-        int size;
-        unsigned char is_negated;
-    } cclass;
-
-    #define RESET_CCLASS() memset(&cclass, 0, sizeof(struct Cclass))
-    RESET_CCLASS();
-
-    for (int i=0 ; i<tl_in->n ; i++, t++) {
-        if ((*t)->type == RE_TOK_TYPE_CCLASS_START) {
-            DEBUG("START OF CCLASS\n");
-            cclass.in_cclass = 1;
-        }
-        else if ((*t)->type == RE_TOK_TYPE_CCLASS_END) {
-            if (!cclass.in_cclass) {
-                DEBUG("Malformatted cclass\n");
-                return NULL;
-            }
-
-            DEBUG("END OF CCLASS\n");
-            struct ReToken *t_cclass;
-
-            if (cclass.is_negated)
-                t_cclass = re_token_init(RE_TOK_TYPE_CCLASS_NEGATED);
-            else
-                t_cclass = re_token_init(RE_TOK_TYPE_CCLASS);
-
-            t_cclass->c0 = 'x';
-
-            struct ReToken **cur = cclass.tokens;
-            struct ReToken *tcclassp = t_cclass;
-            struct ReToken **prev = &tcclassp;
-
-            for (; *cur != NULL && (*cur)->type != RE_TOK_TYPE_UNDEFINED ; cur++) {
-                (*prev)->next = *cur;
-                prev = cur;
-            }
-
-            if (!re_tokenlist_append(tl_out, t_cclass))
-                return NULL;
-
-            RESET_CCLASS();
-        }
-        else if (cclass.in_cclass && cclass.size == 0 && (*t)->type == RE_TOK_TYPE_CARET) {
-            DEBUG("IS NEGATED\n");
-            cclass.is_negated = 1;
-        }
-        else if (cclass.in_cclass) {
-            cclass.tokens[cclass.size++] = *t;
-            DEBUG("CCLASS TOKEN: %s, %s\n", re_token_type_to_str((*t)->type), re_token_to_str(*t));
-        }
-        else {
-            if (!re_tokenlist_append(tl_out, *t))
-                return NULL;
-        }
-    }
-    return tl_out;
 }
 
 struct TokenList* re_tokenlist_to_postfix(struct TokenList *tl)
