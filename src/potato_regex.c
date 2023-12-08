@@ -487,6 +487,10 @@ struct TokenList* re_tokenlist_parse_cclass(struct TokenList *tl)
             i--;
         }
     }
+    if (cclass.in_cclass) {
+        ERROR("Failed to find end of character class\n");
+        return NULL;
+    }
     return tl;
 }
 
