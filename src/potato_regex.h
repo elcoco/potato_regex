@@ -22,13 +22,27 @@
 // TODO: Add ^ and $ for beginning/end of input string
 // TODO: Token pool should be stored inside Rexex struct
 
-extern int do_debug;
-extern int do_info;
-extern int do_error;
+#define DO_DEBUG
+#define DO_INFO
+#define DO_ERROR
 
-#define DEBUG(M, ...) if(do_debug){fprintf(stdout, "[DEBUG] " M, ##__VA_ARGS__);}
-#define INFO(M, ...) if(do_info){fprintf(stdout, M, ##__VA_ARGS__);}
-#define ERROR(M, ...) if(do_error){fprintf(stderr, "[ERROR] (%s:%d) " M, __FILE__, __LINE__, ##__VA_ARGS__);}
+#ifdef DO_DEBUG
+    #define DEBUG(M, ...) fprintf(stdout, "[DEBUG] " M, ##__VA_ARGS__)
+#else
+    #define DEBUG(M, ...) ()
+#endif
+
+#ifdef DO_INFO
+    #define INFO(M, ...) fprintf(stdout, "[INFO]  " M, ##__VA_ARGS__)
+#else
+    #define INFO(M, ...) ()
+#endif
+
+#ifdef DO_ERROR
+    #define ERROR(M, ...) fprintf(stderr, "[ERROR] (%s:%d) " M, __FILE__, __LINE__, ##__VA_ARGS__)
+#else
+    #define ERROR(M, ...) ()
+#endif
 
 #define RE_MAX_TOKEN_POOL           256
 #define RE_MAX_STR_RESULT           128
