@@ -25,7 +25,10 @@ int main(int argc, char **argv)
     DEBUG("Parsing: %s\n", expr);
 
     struct Regex re;
-    re_init(&re, expr);
+    if (re_init(&re, expr) == NULL) {
+        ERROR("Failed init\n");
+        return 1;
+    }
 
     struct ReMatch m = re_match(&re, input, result, RE_MAX_STR_RESULT);
     if (m.state >= 0) {

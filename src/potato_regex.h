@@ -30,16 +30,17 @@ extern int do_error;
 #define INFO(M, ...) if(do_info){fprintf(stdout, M, ##__VA_ARGS__);}
 #define ERROR(M, ...) if(do_error){fprintf(stderr, "[ERROR] (%s:%d) " M, __FILE__, __LINE__, ##__VA_ARGS__);}
 
-#define RE_MAX_TOKEN_POOL  128
-#define RE_MAX_STR_RESULT  128
-#define RE_MAX_STATE_POOL  1024
-#define RE_MAX_OUT_LIST_POOL  1024
-#define RE_MAX_GROUP_STACK 256
-#define RE_MAX_STATE_OUT   1024
-#define RE_MAX_CCLASS   32
-#define RE_MAX_TOKEN_STR_REPR 64
-#define RE_MAX_TOKEN_TYPE_STR_REPR 64
-#define RE_MAX_MATCH_LIST 256
+#define RE_MAX_TOKEN_POOL           256
+#define RE_MAX_STR_RESULT           128
+#define RE_MAX_STATE_POOL          1024
+#define RE_MAX_OUT_LIST_POOL       1024
+#define RE_MAX_GROUP_STACK          256
+#define RE_MAX_STATE_OUT           1024
+#define RE_MAX_CCLASS                32
+#define RE_MAX_TOKEN_STR_REPR        64
+#define RE_MAX_TOKEN_TYPE_STR_REPR   64
+#define RE_MAX_MATCH_LIST           256
+#define RE_MAX_REGEX                256
 
 #define PRRESET   "\x1B[0m"
 #define PRRED     "\x1B[31m"
@@ -50,11 +51,10 @@ extern int do_error;
 #define PRCYAN    "\x1B[36m"
 #define PRWHITE   "\x1B[37m"
 
-#define RE_MAX_REGEX 256
 
 #define RE_CONCAT_SYM '&'
-#define RE_RE_SPACE_CHARS           " \t"
-#define RE_RE_LINE_BREAK_CHARS           "\n\r"
+#define RE_RE_SPACE_CHARS      " \t"
+#define RE_RE_LINE_BREAK_CHARS "\n\r"
 
 
 /* Enum is ordered in order of precedence, do not change order!!!
@@ -105,6 +105,7 @@ enum ReTokenType {
     RE_TOK_TYPE_RANGE,              // not a meta char, but represents a range
 };
 
+// String representations for types. Only used for debugging messages
 static const char *token_type_table[] = {
     "RE_TOK_TYPE_UNDEFINED",
     "RE_TOK_TYPE_PLUS",       //  +   GREEDY     match preceding 1 or more times
@@ -189,7 +190,8 @@ struct MatchList {
 struct TokenList {
     struct ReToken *tokens[RE_MAX_REGEX];
     int n;
-    struct ReState pool[RE_MAX_TOKEN_POOL];
+    struct ReToken pool[RE_MAX_TOKEN_POOL];
+    int pooln;
 };
 
 /* PUBLIC */

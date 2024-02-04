@@ -12,33 +12,21 @@ static void   group_patch_outlist(struct Group *g, struct ReState **s);
 static struct OutList* outlist_join(struct OutList *l0, struct OutList *l1);
 
 //static struct ReToken re_str_to_token(const char **s);
-static struct ReToken* re_token_from_str(const char **s);
+static struct ReToken* re_token_from_str(struct ReToken *tok, const char **s);
 static char* re_token_to_str(struct  ReToken *t);
 static const char* re_token_type_to_str(enum ReTokenType type);
 static int re_match_list_has_token(struct MatchList *clist, struct MatchList *nlist, char c);
 
-static struct ReToken* re_token_init(enum ReTokenType type);
+static struct ReToken* re_tokenlist_token_init(struct TokenList *tl, enum ReTokenType type);
 static int re_token_match_class(struct ReToken *t, char c);
 static int re_is_in_range(char c, char lc, char rc);
 static int re_token_match_chr(struct ReToken *t, char c);
 
 static struct ReState* re_compile(struct Regex *re, struct TokenList *tl);
-static int re_tokenlist_delete(struct TokenList *tl, struct ReToken *tdel);
 
-// Pool of token structs. We don't use malloc because in MCU's this can result in problems
+struct TokenList infix;
 struct ReToken tpool[RE_MAX_TOKEN_POOL];
 int tpool_n = 0;
-
-
-static int re_is_match(struct ReState *s)
-{
-    return s->type == STATE_TYPE_MATCH;
-}
-
-static int re_is_endpoint(struct ReState *s)
-{
-    return s->out == NULL && s->out1 == NULL;
-}
 
 static int re_is_digit(char c)
 {
@@ -48,11 +36,6 @@ static int re_is_digit(char c)
 static int re_is_alpha(char c)
 {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
-}
-
-static int re_is_upper(char c)
-{
-    return c >= 'A' && c <= 'Z';
 }
 
 static int re_is_lower(char c)
@@ -228,6 +211,8 @@ static void re_match_list_append(struct MatchList *l, struct ReState *s)
     if (s == NULL)
         return;
 
+    //DEBUG("MATCHLIST APPEND: %s %s\n", re_token_type_to_str(s->t->type), re_token_to_str(s->t));
+
     if (s->type == STATE_TYPE_SPLIT) {
         re_match_list_append(l, s->out);
         re_match_list_append(l, s->out1);
@@ -238,20 +223,6 @@ static void re_match_list_append(struct MatchList *l, struct ReState *s)
     }
 }
 
-static void debug_match_list(struct MatchList *l)
-{
-    struct ReState **s = l->states;
-    for (int i=0 ; i<l->n ; i++, s++) {
-        if ((*s)->type == STATE_TYPE_MATCH) {
-            DEBUG("MATCHLIST: [%d] MATCH\n", i);
-        }
-        else {
-            DEBUG("MATCHLIST: [%d] %s\n", i, re_token_to_str((*s)->t));
-        }
-    }
-    DEBUG("\n");
-}
-
 static int re_match_list_has_token(struct MatchList *clist, struct MatchList *nlist, char c)
 {
     /* Look for state->t that match given char. Add matches to nlist.
@@ -259,8 +230,9 @@ static int re_match_list_has_token(struct MatchList *clist, struct MatchList *nl
     struct ReState **s = clist->states;
 
     for (int i=0 ; i<clist->n ; i++, s++) {
+        //DEBUG("   [%d] TRYING FROM MATCHLIST: %s %s\n", i, re_token_type_to_str((*s)->t->type), re_token_to_str((*s)->t));
         if (re_token_match_chr((*s)->t, c)) {
-            DEBUG("ACCEPTED: %s %s\n", re_token_type_to_str((*s)->t->type), re_token_to_str((*s)->t));
+            DEBUG("  ACCEPTED: %s %s\n", re_token_type_to_str((*s)->t->type), re_token_to_str((*s)->t));
             re_match_list_append(nlist, (*s)->out);
             re_match_list_append(nlist, (*s)->out1);
         }
@@ -303,34 +275,6 @@ int re_tokenlist_append(struct TokenList *tl, struct ReToken *t)
     return 1;
 }
 
-static int re_tokenlist_delete(struct TokenList *tl, struct ReToken *tdel)
-{
-    struct ReToken **t_cur = tl->tokens;
-    unsigned char found = 0;
-
-    for (int i=0 ; i<tl->n ; i++, t_cur++) {
-
-        if (!found && tdel == *t_cur) {
-            DEBUG("DELETE: %s %s\n", re_token_type_to_str((*t_cur)->type), re_token_to_str(*t_cur));
-            found = 1;
-            if (tl->n == 1)
-                break;
-        }
-
-        // shift everything after found item to the left
-        if (found) {
-            // handle case where item is only or last item on list
-            if (i < tl->n-1)
-                *t_cur = *(t_cur+1);
-            else
-                break;
-        }
-    }
-    if (found)
-        tl->n--;
-    return found;
-}
-
 static int re_tokenlist_delete_at_index(struct TokenList *tl, int index)
 {
     if (index > tl->n-1) {
@@ -347,32 +291,6 @@ static int re_tokenlist_delete_at_index(struct TokenList *tl, int index)
     }
     tl->n--;
     return 1;
-}
-
-static int re_tokenlist_insert(struct TokenList *tl, struct ReToken *t_after, struct ReToken *t, int max)
-{
-    struct ReToken **t_cur = tl->tokens;
-
-    for (int i=0 ; i<tl->n ; i++, t_cur++) {
-
-        if (t_after == *t_cur) {
-            DEBUG("INSERT AFTER: %s %s\n", re_token_type_to_str((*t_cur)->type), re_token_to_str(*t_cur));
-
-            if (tl->n+1 > max) {
-                ERROR("Failed to insert token, buffer too small: %d\n", max);
-                return -1;
-            }
-
-            // shift everything after found item to the right starting at the end
-            for (int j=tl->n-1 ; j>=i ; j--)
-                *(tl->tokens+j+1) = *(tl->tokens+j);
-            *(t_cur+1) = t;
-            tl->n++;
-            return 1;
-        }
-    }
-    ERROR("Failed to insert token, pointer not found\n");
-    return 0;
 }
 
 static int re_tokenlist_insert_at_index(struct TokenList *tl, int index, struct ReToken *t, int max)
@@ -417,9 +335,11 @@ struct TokenList* re_tokenlist_from_str(const char *expr, struct TokenList *tl)
     const char **p_in = &expr;
 
     while (strlen(*p_in)) {
-        struct ReToken *t = re_token_from_str(p_in);
+        struct ReToken *t = re_tokenlist_token_init(tl, RE_TOK_TYPE_UNDEFINED);
         if (t == NULL)
             return NULL;
+
+        re_token_from_str(t, p_in);
 
         assert(t->type != RE_TOK_TYPE_UNDEFINED);
         if (re_tokenlist_append(tl, t) < 0)
@@ -450,11 +370,10 @@ struct TokenList* re_tokenlist_parse_cclass(struct TokenList *tl)
         struct ReToken *t = *(tl->tokens+i);
 
         if (t->type == RE_TOK_TYPE_CCLASS_START) {
-            DEBUG("START OF CCLASS\n");
             cclass.in_cclass = 1;
             if (!re_tokenlist_delete_at_index(tl, i))
                 return NULL;
-            cclass.t = re_token_init(RE_TOK_TYPE_CCLASS);
+            cclass.t = re_tokenlist_token_init(tl, RE_TOK_TYPE_CCLASS);
             cclass.t->c0 = 'x';
             if (!re_tokenlist_insert_at_index(tl, i, cclass.t, RE_MAX_REGEX))
                 return NULL;
@@ -465,14 +384,12 @@ struct TokenList* re_tokenlist_parse_cclass(struct TokenList *tl)
                 return NULL;
             }
 
-            DEBUG("END OF CCLASS\n");
             if (!re_tokenlist_delete_at_index(tl, i--))
                 return NULL;
             RESET_CCLASS();
 
         }
         else if (cclass.in_cclass && cclass.size == 0 && t->type == RE_TOK_TYPE_CARET) {
-            DEBUG("IS NEGATED\n");
             cclass.t->type = RE_TOK_TYPE_CCLASS_NEGATED;
             if (!re_tokenlist_delete_at_index(tl, i--))
                 return NULL;
@@ -494,68 +411,90 @@ struct TokenList* re_tokenlist_parse_cclass(struct TokenList *tl)
     return tl;
 }
 
-struct TokenList* re_tokenlist_to_postfix(struct TokenList *tl)
+struct TokenList* re_tokenlist_to_postfix_bak(struct TokenList *tl)
 {
-    struct ReToken *tcat = (re_token_init(RE_TOK_TYPE_CONCAT));
-    struct ReToken *tpipe = (re_token_init(RE_TOK_TYPE_PIPE));
+    struct ReToken *tcat = (re_tokenlist_token_init(tl, RE_TOK_TYPE_CONCAT));
+    struct ReToken *tpipe = (re_tokenlist_token_init(tl, RE_TOK_TYPE_PIPE));
+    if (!tcat || !tpipe)
+        return NULL;
     tcat->c0 = RE_CONCAT_SYM;
     tpipe->c0 = '|';
 
-	int nalt, natom;
+	int npipe, natom;
 
+    // track pipes and cats in group: (...|...)
 	struct {
-		int nalt;
+		int npipe;
 		int natom;
-	} paren[100], *p;
+	} group[100], *p;
 	
-	p = paren;
-	nalt = 0;
+	p = group;
+	npipe = 0;
 	natom = 0;
 
 	for (int i=0; i<tl->n; i++) {
+        //DEBUG("npipe,natom: %d %d: ", npipe, natom);
+        //re_tokenlist_debug(tl);
         struct ReToken *t = *(tl->tokens + i);
 		switch(t->type) {
 
             case RE_TOK_TYPE_GROUP_START:
+                DEBUG("GROUP START: %d\n", i);
+                if (!re_tokenlist_delete_at_index(tl, i--))
+                    return NULL;
+
                 if (natom > 1){
                     --natom;
-                    if (!re_tokenlist_insert_at_index(tl, i++, tcat, RE_MAX_REGEX))
+                    if (!re_tokenlist_insert_at_index(tl, ++i, tcat, RE_MAX_REGEX))
                         return NULL;
                 }
-                if (p >= paren+100)
+                if (p >= group+100) {
+                    ERROR("Failed to get group, pool empty!\n");
                     return NULL;
-                p->nalt = nalt;
+                }
+                p->npipe = npipe;
                 p->natom = natom;
                 p++;
-                nalt = 0;
+                npipe = 0;
                 natom = 0;
                 break;
             case RE_TOK_TYPE_PIPE:
-                if (natom == 0)
+                // Remove pipe from tokenlist and either place it at group end or at end of expression
+                if (natom == 0) {
+                    ERROR("FAIL!\n");
                     return NULL;
+                }
+                if (!re_tokenlist_delete_at_index(tl, i--))
+                    return NULL;
+
                 while (--natom > 0) {
-                    if (!re_tokenlist_delete_at_index(tl, i++))
-                        return NULL;
-                    if (!re_tokenlist_insert_at_index(tl, i++, tcat, RE_MAX_REGEX))
+                    if (!re_tokenlist_insert_at_index(tl, ++i, tcat, RE_MAX_REGEX))
                         return NULL;
                 }
-                nalt++;
+                npipe++;
                 break;
             case RE_TOK_TYPE_GROUP_END:
-                if (p == paren)
+                if (p == group) {
+                    ERROR("Unexpected ')' found!\n");
                     return NULL;
+                }
                 if (natom == 0)
                     return NULL;
+                if (!re_tokenlist_delete_at_index(tl, i--))
+                    return NULL;
+                // NOTE if deleted, we should not increment i!!!!!!!!!!!
+
+                // put all pipes and cats at end of group
                 while (--natom > 0) {
-                    if (!re_tokenlist_insert_at_index(tl, i++, tcat, RE_MAX_REGEX))
+                    if (!re_tokenlist_insert_at_index(tl, ++i, tcat, RE_MAX_REGEX))
                         return NULL;
                 }
-                for (; nalt > 0; nalt--) {
-                    if (!re_tokenlist_insert_at_index(tl, i++, tpipe, RE_MAX_REGEX))
+                for (; npipe > 0; npipe--) {
+                    if (!re_tokenlist_insert_at_index(tl, ++i, tpipe, RE_MAX_REGEX))
                         return NULL;
                 }
                 --p;
-                nalt = p->nalt;
+                npipe = p->npipe;
                 natom = p->natom;
                 natom++;
                 break;
@@ -575,19 +514,137 @@ struct TokenList* re_tokenlist_to_postfix(struct TokenList *tl)
                 break;
             }
 	}
-	if (p != paren)
+    // all groups should be processed so p should be the first and only group
+	if (p != group) {
+        ERROR("Group not closed!\n");
 		return NULL;
+    }
 	while (--natom > 0) {
 		if (!re_tokenlist_append(tl, tcat))
             return NULL;
     }
-	for (; nalt > 0; nalt--) {
+	for (; npipe > 0; npipe--) {
 		if (!re_tokenlist_append(tl, tpipe))
             return NULL;
     }
-
 	return tl;
 }
+
+struct TokenList* re_tokenlist_to_postfix(struct TokenList *tl_in, struct TokenList *tl_out)
+{
+    struct ReToken *tcat = re_tokenlist_token_init(tl_in, RE_TOK_TYPE_CONCAT);
+    struct ReToken *tpipe = re_tokenlist_token_init(tl_in, RE_TOK_TYPE_PIPE);
+    if (!tcat || !tpipe)
+        return NULL;
+
+    tcat->c0 = RE_CONCAT_SYM;
+    tpipe->c0 = '|';
+
+	int nalt, natom;
+
+	struct {
+		int nalt;
+		int natom;
+	} paren[100], *p;
+	
+	p = paren;
+	nalt = 0;
+	natom = 0;
+
+    struct ReToken **t = tl_in->tokens;
+	for (int i=0; i<tl_in->n; i++,t++) {
+        assert((*t)->type != RE_TOK_TYPE_UNDEFINED);
+		switch((*t)->type) {
+
+            case RE_TOK_TYPE_GROUP_START:
+                if (natom > 1){
+                    --natom;
+                    if (!re_tokenlist_append(tl_out, tcat))
+                        return NULL;
+                }
+                if (p >= paren+100)
+                    return NULL;
+                p->nalt = nalt;
+                p->natom = natom;
+                p++;
+                nalt = 0;
+                natom = 0;
+                break;
+            case RE_TOK_TYPE_PIPE:
+                if (natom == 0)
+                    return NULL;
+                while (--natom > 0) {
+                    if (!re_tokenlist_append(tl_out, tcat))
+                        return NULL;
+                }
+                nalt++;
+                break;
+            case RE_TOK_TYPE_GROUP_END:
+                if (p == paren)
+                    return NULL;
+                if (natom == 0)
+                    return NULL;
+                while (--natom > 0) {
+                    if (!re_tokenlist_append(tl_out, tcat))
+                        return NULL;
+                }
+                for (; nalt > 0; nalt--) {
+                    if (!re_tokenlist_append(tl_out, tpipe))
+                        return NULL;
+                }
+                --p;
+                nalt = p->nalt;
+                natom = p->natom;
+                natom++;
+                break;
+            case RE_TOK_TYPE_STAR:
+            case RE_TOK_TYPE_PLUS:
+            case RE_TOK_TYPE_QUESTION:
+                if (natom == 0)
+                    return NULL;
+                if (!re_tokenlist_append(tl_out, *t))
+                    return NULL;
+                break;
+            default:
+                if (natom > 1){
+                    --natom;
+                    if (!re_tokenlist_append(tl_out, tcat))
+                        return NULL;
+                }
+                if (!re_tokenlist_append(tl_out, *t))
+                    return NULL;
+                natom++;
+                break;
+            }
+	}
+	if (p != paren)
+		return NULL;
+	while (--natom > 0) {
+		if (!re_tokenlist_append(tl_out, tcat))
+            return NULL;
+    }
+	for (; nalt > 0; nalt--) {
+		if (!re_tokenlist_append(tl_out, tpipe))
+            return NULL;
+    }
+
+	return tl_out;
+}
+
+static struct ReToken* re_tokenlist_token_init(struct TokenList *tl, enum ReTokenType type)
+{
+    /* Get new token from pool */
+
+    if (tl->pooln +1 > RE_MAX_TOKEN_POOL) {
+        ERROR("No more tokens in pool: %d\n", RE_MAX_TOKEN_POOL);
+        return NULL;
+    }
+    struct ReToken *t = tl->pool + tl->pooln++;
+    memset(t, 0, sizeof(struct ReToken));
+    t->type = type;
+    return t;
+}
+
 
 /*
 int re_tokenlist_to_postfix_old(struct ReToken *tokens, struct ReToken *buf, size_t size)
@@ -736,18 +793,7 @@ struct ReToken* re_tokenlist_to_explicit_cat_old(struct ReToken *tokens, size_t 
     #undef PUSH_OR_RETURN
 }
 
-
 ///// TOKEN //////////////////////////////////////////////////////////
-static struct ReToken* re_token_init(enum ReTokenType type)
-{
-    /* Get new token from pool */
-    //struct ReToken *t = &(tpool[tpool_n++]);
-    struct ReToken *t = tpool + tpool_n++;
-    memset(t, 0, sizeof(struct ReToken));
-    t->type = type;
-    return t;
-}
-
 static const char* re_token_type_to_str(enum ReTokenType type)
 {
     static char buf[RE_MAX_TOKEN_TYPE_STR_REPR] = "";
@@ -759,6 +805,7 @@ static const char* re_token_type_to_str(enum ReTokenType type)
 static char* re_token_to_str(struct  ReToken *t)
 {
     /* Get string representation of token */
+    assert(t != NULL);
     static char buf[RE_MAX_TOKEN_STR_REPR] = "";
     struct ReToken *tcclass;
     buf[0] = '\0';
@@ -766,13 +813,14 @@ static char* re_token_to_str(struct  ReToken *t)
         case RE_TOK_TYPE_CCLASS:
         case RE_TOK_TYPE_CCLASS_NEGATED:
             tcclass = t->next;
-            char tmp[RE_MAX_TOKEN_STR_REPR] = "";
+            char tmp[RE_MAX_TOKEN_STR_REPR] = "[";
             while (tcclass != NULL) {
                 if (tcclass != t->next)
-                    strncat(tmp, " -> ", sizeof(tmp) - strlen(tmp) -1);
+                    strncat(tmp, "->", sizeof(tmp) - strlen(tmp) -1);
                 strncat(tmp, re_token_to_str(tcclass), sizeof(tmp) - strlen(tmp) -1);
                 tcclass = tcclass->next;
             }
+            strncat(tmp, "]", sizeof(tmp) - strlen(tmp) -1);
             memcpy(buf, tmp, sizeof(buf));
             break;
         case RE_TOK_TYPE_CONCAT:
@@ -870,14 +918,15 @@ static int re_token_match_class(struct ReToken *token, char c)
     return 0;
 }
 
-static struct ReToken* re_token_from_str(const char **s)
+static struct ReToken* re_token_from_str(struct ReToken *tok, const char **s)
 {
     /* Reads first meta char from string and convert to Token struct.
      * If one char meta or char, increment pointer +1
      * If two char meta, increment pointer +2 */
     assert(strlen(*s) > 0);
+    assert(tok != NULL);
 
-    struct ReToken *tok = re_token_init(RE_TOK_TYPE_UNDEFINED);
+    //struct ReToken *tok = re_token_init(tl, RE_TOK_TYPE_UNDEFINED);
 
     char c = **s;
 
@@ -995,17 +1044,25 @@ struct Regex* re_init(struct Regex *re, const char *expr)
 
     memset(re, 0, sizeof(struct Regex));
 
+    infix = re_tokenlist_init();
     re->tokens = re_tokenlist_init();
 
     if (re_tokenlist_from_str(expr, &re->tokens) == NULL)
         return NULL;
 
+    re_tokenlist_debug(&re->tokens);
+
     if (re_tokenlist_parse_cclass(&re->tokens) == NULL)
         return NULL;
 
-    if (re_tokenlist_to_postfix(&re->tokens) == NULL)
+
+    DEBUG("INFIX: ");
+    re_tokenlist_debug(&re->tokens);
+
+    if (re_tokenlist_to_postfix_bak(&re->tokens) == NULL)
         return NULL;
 
+    DEBUG("POSTFIX: ");
     re_tokenlist_debug(&re->tokens);
 
     if (re_compile(re, &re->tokens) == NULL)
@@ -1132,6 +1189,20 @@ void re_match_debug(struct ReMatch *m)
     }
 }
 
+static void debug_match_list(struct MatchList *l)
+{
+    struct ReState **s = l->states;
+    for (int i=0 ; i<l->n ; i++, s++) {
+        if ((*s)->type == STATE_TYPE_MATCH) {
+            DEBUG("MATCHLIST: [%d] MATCH\n", i);
+        }
+        else {
+            DEBUG("MATCHLIST: [%d] %s\n", i, re_token_to_str((*s)->t));
+        }
+    }
+    DEBUG("\n");
+}
+
 struct ReMatch re_match(struct Regex *re, const char *str, char *buf, size_t bufsiz)
 {
     /* Run NFA state machine on string to check for a match */
@@ -1153,8 +1224,20 @@ struct ReMatch re_match(struct Regex *re, const char *str, char *buf, size_t buf
     struct MatchList *nlist = &l1;
     struct MatchList *bak;
 
+    int is_anchored = 0;
+
     // add first node
-    re_match_list_append(clist, re->start);
+    if (re->start->t->type == RE_TOK_TYPE_CARET) {
+        DEBUG("IS ANCHORED AT START\n");
+        is_anchored = 1;
+        re_match_list_append(clist, re->start->out);
+    }
+    else {
+        re_match_list_append(clist, re->start);
+    }
+
+    // add first node
+    //re_match_list_append(clist, re->start);
 
     DEBUG("INPUT STRING: %s\n", str);
 
@@ -1179,6 +1262,7 @@ struct ReMatch re_match(struct Regex *re, const char *str, char *buf, size_t buf
             nlist = bak;
 
             if (re_match_list_has_match(clist)) {
+                debug_match_list(clist);
                 m.endp = c;
                 m.iend = i-1;
                 m.state = 1;
