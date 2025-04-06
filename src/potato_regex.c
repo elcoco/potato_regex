@@ -1,9 +1,5 @@
 #include "potato_regex.h"
 
-int do_debug = 1;
-int do_info = 1;
-int do_error = 1;
-
 static struct ReState* re_state_init(struct Regex *re, struct ReToken *t, enum ReStateType type, struct ReState *s_out, struct ReState *s_out1);
 static struct OutList* ol_init(struct OutList *l, struct ReState **s);
 static struct Group group_init(struct ReState *s_start, struct OutList *out);
@@ -25,8 +21,8 @@ static int re_token_match_chr(struct ReToken *t, char c);
 static struct ReState* re_compile(struct Regex *re, struct TokenList *tl);
 
 struct TokenList infix;
-struct ReToken tpool[RE_MAX_TOKEN_POOL];
-int tpool_n = 0;
+//struct ReToken tpool[RE_MAX_TOKEN_POOL];
+//int tpool_n = 0;
 
 static int re_is_digit(char c)
 {
@@ -1050,6 +1046,7 @@ struct Regex* re_init(struct Regex *re, const char *expr)
     if (re_tokenlist_from_str(expr, &re->tokens) == NULL)
         return NULL;
 
+    DEBUG("TOKENIZED: ");
     re_tokenlist_debug(&re->tokens);
 
     if (re_tokenlist_parse_cclass(&re->tokens) == NULL)
@@ -1068,6 +1065,7 @@ struct Regex* re_init(struct Regex *re, const char *expr)
     if (re_compile(re, &re->tokens) == NULL)
         return NULL;
 
+    DEBUG("NFA:\n");
     re_state_debug(re->start, 0);
     return re;
 }
@@ -1226,7 +1224,7 @@ struct ReMatch re_match(struct Regex *re, const char *str, char *buf, size_t buf
 
     int is_anchored = 0;
 
-    // add first node
+    // add first node, or second if we're anchored at start of string
     if (re->start->t->type == RE_TOK_TYPE_CARET) {
         DEBUG("IS ANCHORED AT START\n");
         is_anchored = 1;
@@ -1236,8 +1234,6 @@ struct ReMatch re_match(struct Regex *re, const char *str, char *buf, size_t buf
         re_match_list_append(clist, re->start);
     }
 
-    // add first node
-    //re_match_list_append(clist, re->start);
 
     DEBUG("INPUT STRING: %s\n", str);
 

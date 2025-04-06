@@ -18,9 +18,12 @@
  * https://www.youtube.com/watch?v=QzVVjboyb0s
  */
 
-// TODO: Greediness is not concidered when using * or +
+// TODO: Greediness should be concidered when using * or +
 // TODO: Add ^ and $ for beginning/end of input string
-// TODO: Token pool should be stored inside Rexex struct
+// TODO: Infix tokens should not be global but stored within Regex
+// TODO: match literal [] chars when escaped
+// TODO: if we're not anchored at start of inp string, we shoud iter over the string to find a result
+// TODO: most functions should return a state enum indicating error/success
 
 #define DO_DEBUG
 #define DO_INFO
